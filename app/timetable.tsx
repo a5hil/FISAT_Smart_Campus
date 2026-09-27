@@ -7,7 +7,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
-import { useApp } from '../context/AppContext';
+import { useApp, useTheme } from '../context/AppContext';
 import { TimetableConfig, TimetablePeriod, BellPattern } from '../types';
 
 const DAYS = [
@@ -30,10 +30,13 @@ const BELL_PATTERNS: { id: BellPattern; name: string; desc: string; icon: string
 export default function TimetableScreen() {
   const router = useRouter();
   const { timetable, updateTimetable, triggerBellTest, esp32Connected } = useApp();
+  const { colors, isDark } = useTheme();
 
   const [activeConfig, setActiveConfig] = useState<TimetableConfig>(timetable);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingPeriodId, setEditingPeriodId] = useState<string | null>(null);
+
+  const styles = React.useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const [periodName, setPeriodName] = useState('');
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('10:00');
@@ -222,10 +225,10 @@ export default function TimetableScreen() {
 
   const getTypeColor = (type: string) => {
     switch (type) {
-      case 'break': return Colors.warning;
-      case 'lunch': return Colors.success;
+      case 'break': return colors.warning;
+      case 'lunch': return colors.success;
       case 'lab': return '#9B51E0';
-      default: return Colors.primary;
+      default: return colors.primary;
     }
   };
 
@@ -234,14 +237,14 @@ export default function TimetableScreen() {
       {/* Screen Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={24} color={Colors.text} />
+          <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerTextContainer}>
           <Text style={styles.headerTitle}>Class Timetable & Bell</Text>
           <Text style={styles.headerSubtitle}>FISAT Automated Period Schedule</Text>
         </View>
         <TouchableOpacity style={styles.addIconButton} onPress={openAddModal}>
-          <Ionicons name="add" size={24} color={Colors.primary} />
+          <Ionicons name="add" size={24} color={colors.primary} />
         </TouchableOpacity>
       </View>
 
@@ -250,7 +253,7 @@ export default function TimetableScreen() {
         <View style={styles.liveCard}>
           <View style={styles.liveHeaderRow}>
             <View style={styles.liveBadgeRow}>
-              <View style={[styles.liveDot, { backgroundColor: currentPeriod ? Colors.success : Colors.textMuted }]} />
+              <View style={[styles.liveDot, { backgroundColor: currentPeriod ? colors.success : colors.textMuted }]} />
               <Text style={styles.liveBadgeText}>
                 {currentPeriod ? 'CLASS IN SESSION' : 'NO CLASS ACTIVE'}
               </Text>
@@ -265,7 +268,7 @@ export default function TimetableScreen() {
                 {currentPeriod.startTime} — {currentPeriod.endTime}
               </Text>
               <View style={styles.countdownBadge}>
-                <Ionicons name="alarm-outline" size={16} color={Colors.primary} />
+                <Ionicons name="alarm-outline" size={16} color={colors.primary} />
                 <Text style={styles.countdownText}>
                   Hour ends in {minutesRemaining} min{minutesRemaining === 1 ? '' : 's'} (Buzzer will ring)
                 </Text>
@@ -287,7 +290,7 @@ export default function TimetableScreen() {
         <View style={styles.sectionCard}>
           <View style={styles.cardHeaderRow}>
             <View style={styles.cardIconBox}>
-              <Ionicons name="notifications" size={20} color={Colors.primary} />
+              <Ionicons name="notifications" size={20} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.sectionTitle}>Automated Period Bell</Text>
@@ -296,8 +299,8 @@ export default function TimetableScreen() {
             <Switch
               value={activeConfig.enabled}
               onValueChange={handleToggleMaster}
-              trackColor={{ false: 'rgba(255, 255, 255, 0.15)', true: Colors.primary }}
-              thumbColor={activeConfig.enabled ? '#FFF' : '#DDD'}
+              trackColor={{ false: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)', true: colors.primary }}
+              thumbColor={activeConfig.enabled ? '#FFF' : (isDark ? '#DDD' : '#F1F5F9')}
             />
           </View>
 
@@ -330,7 +333,7 @@ export default function TimetableScreen() {
               disabled={testingBell}
               activeOpacity={0.7}
             >
-              <Ionicons name="volume-medium-outline" size={15} color={Colors.primary} />
+              <Ionicons name="volume-medium-outline" size={15} color={colors.primary} />
               <Text style={styles.testBellBtnText}>
                 {testingBell ? 'Ringing...' : 'Test Bell'}
               </Text>
@@ -350,7 +353,7 @@ export default function TimetableScreen() {
                   <Ionicons
                     name={pat.icon as any}
                     size={18}
-                    color={selected ? Colors.primary : Colors.textMuted}
+                    color={selected ? colors.primary : colors.textMuted}
                   />
                   <Text style={[styles.patternName, selected && styles.patternNameActive]}>
                     {pat.name}
@@ -368,7 +371,7 @@ export default function TimetableScreen() {
             Daily Schedule ({activeConfig.periods.length} Periods)
           </Text>
           <TouchableOpacity style={styles.addTextBtn} onPress={openAddModal}>
-            <Ionicons name="add-circle-outline" size={16} color={Colors.primary} />
+            <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
             <Text style={styles.addTextBtnLabel}>Add Period</Text>
           </TouchableOpacity>
         </View>
@@ -395,7 +398,7 @@ export default function TimetableScreen() {
                   <Switch
                     value={p.enabled}
                     onValueChange={() => handleTogglePeriod(p.id)}
-                    trackColor={{ false: 'rgba(255, 255, 255, 0.12)', true: Colors.primary }}
+                    trackColor={{ false: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)', true: colors.primary }}
                     thumbColor={p.enabled ? '#FFF' : '#AAA'}
                     style={{ transform: [{ scale: 0.85 }] }}
                   />
@@ -403,7 +406,7 @@ export default function TimetableScreen() {
 
                 <View style={styles.periodBottomRow}>
                   <View style={styles.timeTag}>
-                    <Ionicons name="time-outline" size={14} color={Colors.textMuted} />
+                    <Ionicons name="time-outline" size={14} color={colors.textMuted} />
                     <Text style={styles.timeTagText}>
                       {p.startTime} — {p.endTime}
                     </Text>
@@ -415,14 +418,14 @@ export default function TimetableScreen() {
                       onPress={() => openEditModal(p)}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                      <Ionicons name="pencil-outline" size={16} color={Colors.textMuted} />
+                      <Ionicons name="pencil-outline" size={16} color={colors.textMuted} />
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.actionBtn}
                       onPress={() => handleDeletePeriod(p.id)}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                      <Ionicons name="trash-outline" size={16} color={Colors.critical} />
+                      <Ionicons name="trash-outline" size={16} color={colors.critical} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -443,7 +446,7 @@ export default function TimetableScreen() {
                 {editingPeriodId ? 'Edit Period' : 'Add Schedule Period'}
               </Text>
               <TouchableOpacity onPress={() => setModalVisible(false)}>
-                <Ionicons name="close" size={22} color={Colors.text} />
+                <Ionicons name="close" size={22} color={colors.text} />
               </TouchableOpacity>
             </View>
 
@@ -451,7 +454,7 @@ export default function TimetableScreen() {
             <TextInput
               style={styles.textInput}
               placeholder="e.g. Period 1, Tea Break, Lab Session"
-              placeholderTextColor={Colors.textMuted}
+              placeholderTextColor={colors.inputPlaceholder}
               value={periodName}
               onChangeText={setPeriodName}
             />
@@ -462,7 +465,7 @@ export default function TimetableScreen() {
                 <TextInput
                   style={styles.textInput}
                   placeholder="09:00"
-                  placeholderTextColor={Colors.textMuted}
+                  placeholderTextColor={colors.inputPlaceholder}
                   value={startTime}
                   onChangeText={setStartTime}
                   keyboardType="numbers-and-punctuation"
@@ -473,7 +476,7 @@ export default function TimetableScreen() {
                 <TextInput
                   style={styles.textInput}
                   placeholder="10:00"
-                  placeholderTextColor={Colors.textMuted}
+                  placeholderTextColor={colors.inputPlaceholder}
                   value={endTime}
                   onChangeText={setEndTime}
                   keyboardType="numbers-and-punctuation"
@@ -517,429 +520,431 @@ export default function TimetableScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Layout.spacing.md,
-    paddingTop: Platform.OS === 'ios' ? 54 : 44,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.surfaceTranslucent,
-  },
-  backButton: {
-    padding: 8,
-    marginRight: 6,
-  },
-  headerTextContainer: {
-    flex: 1,
-  },
-  headerTitle: {
-    color: Colors.text,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  headerSubtitle: {
-    color: Colors.textMuted,
-    fontSize: 12,
-  },
-  addIconButton: {
-    padding: 8,
-  },
-  scrollContent: {
-    padding: Layout.spacing.md,
-  },
-  liveCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.lg,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(253, 168, 58, 0.3)',
-    marginBottom: 16,
-  },
-  liveHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  liveBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  liveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  liveBadgeText: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  liveTime: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  currentPeriodInfo: {
-    gap: 4,
-  },
-  currentPeriodName: {
-    color: Colors.text,
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  currentPeriodTime: {
-    color: Colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  countdownBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(253, 168, 58, 0.1)',
-    borderRadius: Layout.radius.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginTop: 8,
-    alignSelf: 'flex-start',
-  },
-  countdownText: {
-    color: Colors.primary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  idlePeriodInfo: {
-    gap: 4,
-  },
-  idleTitle: {
-    color: Colors.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  idleSub: {
-    color: Colors.textMuted,
-    fontSize: 13,
-  },
-  sectionCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.lg,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-    marginBottom: 20,
-  },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
-  },
-  cardIconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(253, 168, 58, 0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sectionTitle: {
-    color: Colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  sectionSubtitle: {
-    color: Colors.textMuted,
-    fontSize: 12,
-  },
-  subLabel: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  daysRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 18,
-  },
-  dayPill: {
-    width: 40,
-    height: 36,
-    borderRadius: Layout.radius.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dayPillActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  dayPillText: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  dayPillTextActive: {
-    color: '#000',
-    fontWeight: '700',
-  },
-  patternHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  testBellBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: Layout.radius.sm,
-    backgroundColor: 'rgba(253, 168, 58, 0.12)',
-  },
-  testBellBtnText: {
-    color: Colors.primary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  patternGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  patternCard: {
-    width: '48%',
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderRadius: Layout.radius.md,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    gap: 4,
-  },
-  patternCardActive: {
-    backgroundColor: 'rgba(253, 168, 58, 0.08)',
-    borderColor: Colors.primary,
-  },
-  patternName: {
-    color: Colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  patternNameActive: {
-    color: Colors.primary,
-  },
-  patternDesc: {
-    color: Colors.textMuted,
-    fontSize: 11,
-  },
-  scheduleHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  scheduleSectionTitle: {
-    color: Colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  addTextBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  addTextBtnLabel: {
-    color: Colors.primary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  periodCard: {
-    flexDirection: 'row',
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.md,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-    overflow: 'hidden',
-  },
-  periodCardDisabled: {
-    opacity: 0.5,
-  },
-  periodTypeBar: {
-    width: 5,
-  },
-  periodContent: {
-    flex: 1,
-    padding: 12,
-    gap: 6,
-  },
-  periodTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  periodTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  periodNameText: {
-    color: Colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  typeBadge: {
-    borderWidth: 1,
-    borderRadius: Layout.radius.sm,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  typeBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  textDisabled: {
-    color: Colors.textMuted,
-  },
-  periodBottomRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  timeTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  timeTagText: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-  },
-  periodActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  actionBtn: {
-    padding: 2,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    width: '100%',
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.lg,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  modalTitle: {
-    color: Colors.text,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  inputLabel: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 6,
-    textTransform: 'uppercase',
-  },
-  textInput: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: Layout.radius.md,
-    padding: 12,
-    color: Colors.text,
-    fontSize: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    marginBottom: 14,
-  },
-  timeInputRow: {
-    flexDirection: 'row',
-    marginBottom: 6,
-  },
-  typeSelectorRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 20,
-  },
-  typePill: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: Layout.radius.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    alignItems: 'center',
-  },
-  typePillActive: {
-    backgroundColor: 'rgba(253, 168, 58, 0.15)',
-    borderColor: Colors.primary,
-  },
-  typePillText: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  typePillTextActive: {
-    color: Colors.primary,
-    fontWeight: '700',
-  },
-  modalBtnRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  modalCancelBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: Layout.radius.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    alignItems: 'center',
-  },
-  modalCancelBtnText: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  modalSaveBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: Layout.radius.md,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-  },
-  modalSaveBtnText: {
-    color: '#000',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-});
+function getStyles(colors: any, isDark: boolean) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: Layout.spacing.md,
+      paddingTop: Platform.OS === 'ios' ? 54 : 44,
+      paddingBottom: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.surfaceBorder,
+    },
+    backButton: {
+      padding: 8,
+      marginRight: 6,
+    },
+    headerTextContainer: {
+      flex: 1,
+    },
+    headerTitle: {
+      color: colors.text,
+      fontSize: 18,
+      fontWeight: '700',
+    },
+    headerSubtitle: {
+      color: colors.textMuted,
+      fontSize: 12,
+    },
+    addIconButton: {
+      padding: 8,
+    },
+    scrollContent: {
+      padding: Layout.spacing.md,
+    },
+    liveCard: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(253, 168, 58, 0.3)' : 'rgba(217, 119, 6, 0.25)',
+      marginBottom: 16,
+    },
+    liveHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    liveBadgeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    liveDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+    },
+    liveBadgeText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
+    liveTime: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
+    currentPeriodInfo: {
+      gap: 4,
+    },
+    currentPeriodName: {
+      color: colors.text,
+      fontSize: 20,
+      fontWeight: '700',
+    },
+    currentPeriodTime: {
+      color: colors.primary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    countdownBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.1)' : 'rgba(217, 119, 6, 0.08)',
+      borderRadius: Layout.radius.sm,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      marginTop: 8,
+      alignSelf: 'flex-start',
+    },
+    countdownText: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    idlePeriodInfo: {
+      gap: 4,
+    },
+    idleTitle: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    idleSub: {
+      color: colors.textMuted,
+      fontSize: 13,
+    },
+    sectionCard: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      marginBottom: 20,
+    },
+    cardHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 16,
+    },
+    cardIconBox: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.12)' : 'rgba(217, 119, 6, 0.1)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sectionTitle: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    sectionSubtitle: {
+      color: colors.textMuted,
+      fontSize: 12,
+    },
+    subLabel: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
+      marginBottom: 8,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    daysRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginBottom: 18,
+    },
+    dayPill: {
+      width: 40,
+      height: 36,
+      borderRadius: Layout.radius.md,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    dayPillActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    dayPillText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    dayPillTextActive: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontWeight: '700',
+    },
+    patternHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    testBellBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: Layout.radius.sm,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.12)' : 'rgba(217, 119, 6, 0.1)',
+    },
+    testBellBtnText: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    patternGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    patternCard: {
+      width: '48%',
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : colors.cardSecondary,
+      borderRadius: Layout.radius.md,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      gap: 4,
+    },
+    patternCardActive: {
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.08)' : 'rgba(217, 119, 6, 0.08)',
+      borderColor: colors.primary,
+    },
+    patternName: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    patternNameActive: {
+      color: colors.primary,
+    },
+    patternDesc: {
+      color: colors.textMuted,
+      fontSize: 11,
+    },
+    scheduleHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    scheduleSectionTitle: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    addTextBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    addTextBtnLabel: {
+      color: colors.primary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    periodCard: {
+      flexDirection: 'row',
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.md,
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      overflow: 'hidden',
+    },
+    periodCardDisabled: {
+      opacity: 0.5,
+    },
+    periodTypeBar: {
+      width: 5,
+    },
+    periodContent: {
+      flex: 1,
+      padding: 12,
+      gap: 6,
+    },
+    periodTopRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    periodTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    periodNameText: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    typeBadge: {
+      borderWidth: 1,
+      borderRadius: Layout.radius.sm,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+    },
+    typeBadgeText: {
+      fontSize: 10,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
+    textDisabled: {
+      color: colors.textMuted,
+    },
+    periodBottomRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    timeTag: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    timeTagText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontVariant: ['tabular-nums'],
+    },
+    periodActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    actionBtn: {
+      padding: 2,
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: colors.modalOverlay,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 20,
+    },
+    modalContent: {
+      width: '100%',
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 20,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    modalTitle: {
+      color: colors.text,
+      fontSize: 18,
+      fontWeight: '700',
+    },
+    inputLabel: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
+      marginBottom: 6,
+      textTransform: 'uppercase',
+    },
+    textInput: {
+      backgroundColor: colors.inputBackground,
+      borderRadius: Layout.radius.md,
+      padding: 12,
+      color: colors.text,
+      fontSize: 14,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+      marginBottom: 14,
+    },
+    timeInputRow: {
+      flexDirection: 'row',
+      marginBottom: 6,
+    },
+    typeSelectorRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 20,
+    },
+    typePill: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: Layout.radius.md,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      alignItems: 'center',
+    },
+    typePillActive: {
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.15)' : 'rgba(217, 119, 6, 0.12)',
+      borderColor: colors.primary,
+    },
+    typePillText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    typePillTextActive: {
+      color: colors.primary,
+      fontWeight: '700',
+    },
+    modalBtnRow: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    modalCancelBtn: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: Layout.radius.md,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : colors.cardSecondary,
+      alignItems: 'center',
+    },
+    modalCancelBtnText: {
+      color: colors.textSecondary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    modalSaveBtn: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: Layout.radius.md,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+    },
+    modalSaveBtnText: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '700',
+    },
+  });
+}

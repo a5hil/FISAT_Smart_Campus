@@ -6,11 +6,14 @@ import { Layout } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
+import { useApp } from '../context/AppContext';
+
 interface ClassroomCardProps {
   classroom: Classroom;
 }
 
 export function ClassroomCard({ classroom }: ClassroomCardProps) {
+  const { colors, isDark } = useApp();
   const router = useRouter();
   
   const activeDevices = classroom.devices.filter(d => d.status === 'on').length;
@@ -19,25 +22,25 @@ export function ClassroomCard({ classroom }: ClassroomCardProps) {
 
   return (
     <TouchableOpacity 
-      style={styles.card}
+      style={[styles.card, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}
       activeOpacity={0.7}
       onPress={() => router.push(`/classroom/${classroom.id}`)}
     >
       <View style={styles.header}>
         <View style={styles.titleContainer}>
-          <Text style={styles.title}>{classroom.name}</Text>
-          <Text style={styles.subtitle}>{classroom.building} • {classroom.floor}</Text>
+          <Text style={[styles.title, { color: colors.text }]}>{classroom.name}</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{classroom.building} • {classroom.floor}</Text>
         </View>
         <View style={styles.statusBadges}>
           {isOffline ? (
-            <View style={[styles.badge, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-              <View style={[styles.dot, { backgroundColor: Colors.critical }]} />
-              <Text style={[styles.badgeText, { color: Colors.critical }]}>Offline</Text>
+            <View style={[styles.badge, { backgroundColor: colors.criticalSubtle }]}>
+              <View style={[styles.dot, { backgroundColor: colors.critical }]} />
+              <Text style={[styles.badgeText, { color: colors.critical }]}>Offline</Text>
             </View>
           ) : (
-            <View style={[styles.badge, { backgroundColor: isOccupied ? 'rgba(76, 175, 80, 0.15)' : 'rgba(255, 255, 255, 0.1)' }]}>
-              <View style={[styles.dot, { backgroundColor: isOccupied ? Colors.success : Colors.textMuted }]} />
-              <Text style={[styles.badgeText, { color: isOccupied ? Colors.success : Colors.textMuted }]}>
+            <View style={[styles.badge, { backgroundColor: isOccupied ? colors.successSubtle : colors.badgeBackground }]}>
+              <View style={[styles.dot, { backgroundColor: isOccupied ? colors.success : colors.textMuted }]} />
+              <Text style={[styles.badgeText, { color: isOccupied ? colors.success : colors.textMuted }]}>
                 {isOccupied ? 'Occupied' : 'Vacant'}
               </Text>
             </View>
@@ -45,18 +48,18 @@ export function ClassroomCard({ classroom }: ClassroomCardProps) {
         </View>
       </View>
 
-      <View style={styles.statsRow}>
+      <View style={[styles.statsRow, { borderTopColor: colors.surfaceBorder }]}>
         <View style={styles.stat}>
-          <Ionicons name="radio-button-on" size={16} color={Colors.primary} />
-          <Text style={styles.statText}>{activeDevices} Active Devices</Text>
+          <Ionicons name="radio-button-on" size={16} color={colors.primary} />
+          <Text style={[styles.statText, { color: colors.textSecondary }]}>{activeDevices} Active Devices</Text>
         </View>
         <View style={styles.stat}>
-          <Ionicons name="thermometer-outline" size={16} color={Colors.textMuted} />
-          <Text style={styles.statText}>{classroom.temperature}°C</Text>
+          <Ionicons name="thermometer-outline" size={16} color={colors.textMuted} />
+          <Text style={[styles.statText, { color: colors.textSecondary }]}>{classroom.temperature}°C</Text>
         </View>
         <View style={styles.stat}>
-          <Ionicons name="flash-outline" size={16} color={Colors.textMuted} />
-          <Text style={styles.statText}>
+          <Ionicons name="flash-outline" size={16} color={colors.textMuted} />
+          <Text style={[styles.statText, { color: colors.textSecondary }]}>
             {classroom.currentLoad < 1000 ? `${classroom.currentLoad.toFixed(0)} W` : `${(classroom.currentLoad / 1000).toFixed(2)} kW`}
           </Text>
         </View>

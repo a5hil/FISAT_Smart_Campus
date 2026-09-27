@@ -4,11 +4,25 @@ import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { FloatingBottomNav } from '../components/FloatingBottomNav';
-import { useApp } from '../context/AppContext';
+import { useApp, useTheme } from '../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 import { NotificationItem } from '../types';
 
-function NotificationCard({ notification, onPress, onDismiss }: { notification: NotificationItem; onPress: () => void; onDismiss: () => void }) {
+function NotificationCard({ 
+  notification, 
+  onPress, 
+  onDismiss,
+  styles,
+  colors,
+  isDark
+}: { 
+  notification: NotificationItem; 
+  onPress: () => void; 
+  onDismiss: () => void;
+  styles: any;
+  colors: any;
+  isDark: boolean;
+}) {
   const getIcon = (): keyof typeof Ionicons.glyphMap => {
     switch (notification.type) {
       case 'device-left-on': return 'alert-circle';
@@ -23,13 +37,13 @@ function NotificationCard({ notification, onPress, onDismiss }: { notification: 
 
   const getIconColor = () => {
     switch (notification.type) {
-      case 'device-left-on': return Colors.warning;
-      case 'device-offline': return Colors.critical;
-      case 'high-consumption': return Colors.primary;
-      case 'classroom-vacant': return Colors.textMuted;
-      case 'controller-reconnected': return Colors.success;
-      case 'maintenance-reminder': return Colors.primary;
-      default: return Colors.text;
+      case 'device-left-on': return colors.warning;
+      case 'device-offline': return colors.critical;
+      case 'high-consumption': return colors.primary;
+      case 'classroom-vacant': return colors.textMuted;
+      case 'controller-reconnected': return colors.success;
+      case 'maintenance-reminder': return colors.primary;
+      default: return colors.text;
     }
   };
 
@@ -43,14 +57,16 @@ function NotificationCard({ notification, onPress, onDismiss }: { notification: 
     return `${days}d ago`;
   };
 
+  const iconColor = getIconColor();
+
   return (
     <TouchableOpacity 
       style={[styles.notifCard, !notification.isRead && styles.notifCardUnread]}
       activeOpacity={0.7}
       onPress={onPress}
     >
-      <View style={[styles.notifIcon, { backgroundColor: `${getIconColor()}20` }]}>
-        <Ionicons name={getIcon()} size={20} color={getIconColor()} />
+      <View style={[styles.notifIcon, { backgroundColor: isDark ? `${iconColor}25` : `${iconColor}18` }]}>
+        <Ionicons name={getIcon()} size={20} color={iconColor} />
       </View>
       <View style={styles.notifContent}>
         <View style={styles.notifHeader}>
@@ -62,13 +78,13 @@ function NotificationCard({ notification, onPress, onDismiss }: { notification: 
         <Text style={styles.notifMessage} numberOfLines={2}>{notification.message}</Text>
         {notification.classroomName && (
           <View style={styles.notifMeta}>
-            <Ionicons name="location-outline" size={12} color={Colors.textMuted} />
+            <Ionicons name="location-outline" size={12} color={colors.textMuted} />
             <Text style={styles.notifMetaText}>{notification.classroomName}</Text>
           </View>
         )}
       </View>
       <TouchableOpacity style={styles.dismissBtn} onPress={onDismiss}>
-        <Ionicons name="close" size={18} color={Colors.textMuted} />
+        <Ionicons name="close" size={18} color={colors.textMuted} />
       </TouchableOpacity>
     </TouchableOpacity>
   );
@@ -76,7 +92,9 @@ function NotificationCard({ notification, onPress, onDismiss }: { notification: 
 
 export default function NotificationsScreen() {
   const { notifications, markNotificationRead, markAllNotificationsRead, deleteNotification } = useApp();
+  const { colors, isDark } = useTheme();
 
+  const styles = React.useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   return (
@@ -107,11 +125,14 @@ export default function NotificationsScreen() {
               notification={notif}
               onPress={() => markNotificationRead(notif.id)}
               onDismiss={() => deleteNotification(notif.id)}
+              styles={styles}
+              colors={colors}
+              isDark={isDark}
             />
           ))
         ) : (
           <View style={styles.emptyState}>
-            <Ionicons name="notifications-off-outline" size={64} color={Colors.surfaceTranslucent} />
+            <Ionicons name="notifications-off-outline" size={64} color={colors.textMuted} />
             <Text style={styles.emptyTitle}>No notifications</Text>
             <Text style={styles.emptySubtitle}>You're all caught up!</Text>
           </View>
@@ -124,106 +145,108 @@ export default function NotificationsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  scrollContent: {
-    padding: Layout.spacing.md,
-  },
-  markAllRead: {
-    color: Colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  unreadBanner: {
-    backgroundColor: 'rgba(253, 168, 58, 0.1)',
-    paddingVertical: 8,
-    paddingHorizontal: Layout.spacing.md,
-  },
-  unreadText: {
-    color: Colors.primary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  notifCard: {
-    flexDirection: 'row',
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.md,
-    padding: 14,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-  },
-  notifCardUnread: {
-    borderColor: Colors.primary,
-    backgroundColor: 'rgba(253, 168, 58, 0.03)',
-  },
-  notifIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  notifContent: {
-    flex: 1,
-    marginRight: 8,
-  },
-  notifHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  notifTitle: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '500',
-    flex: 1,
-    marginRight: 8,
-  },
-  notifTitleUnread: {
-    fontWeight: '700',
-  },
-  notifTime: {
-    color: Colors.textMuted,
-    fontSize: 11,
-  },
-  notifMessage: {
-    color: Colors.textSecondary,
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 6,
-  },
-  notifMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  notifMetaText: {
-    color: Colors.textMuted,
-    fontSize: 12,
-  },
-  dismissBtn: {
-    padding: 4,
-    alignSelf: 'flex-start',
-  },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 80,
-    gap: 12,
-  },
-  emptyTitle: {
-    color: Colors.text,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  emptySubtitle: {
-    color: Colors.textMuted,
-    fontSize: 14,
-  },
-});
+function getStyles(colors: any, isDark: boolean) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scrollContent: {
+      padding: Layout.spacing.md,
+    },
+    markAllRead: {
+      color: colors.primary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    unreadBanner: {
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.1)' : 'rgba(217, 119, 6, 0.08)',
+      paddingVertical: 8,
+      paddingHorizontal: Layout.spacing.md,
+    },
+    unreadText: {
+      color: colors.primary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    notifCard: {
+      flexDirection: 'row',
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.md,
+      padding: 14,
+      marginBottom: 8,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    notifCardUnread: {
+      borderColor: colors.primary,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.03)' : 'rgba(217, 119, 6, 0.03)',
+    },
+    notifIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 12,
+    },
+    notifContent: {
+      flex: 1,
+      marginRight: 8,
+    },
+    notifHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    notifTitle: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '500',
+      flex: 1,
+      marginRight: 8,
+    },
+    notifTitleUnread: {
+      fontWeight: '700',
+    },
+    notifTime: {
+      color: colors.textMuted,
+      fontSize: 11,
+    },
+    notifMessage: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      lineHeight: 18,
+      marginBottom: 6,
+    },
+    notifMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    notifMetaText: {
+      color: colors.textMuted,
+      fontSize: 12,
+    },
+    dismissBtn: {
+      padding: 4,
+      alignSelf: 'flex-start',
+    },
+    emptyState: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingTop: 80,
+      gap: 12,
+    },
+    emptyTitle: {
+      color: colors.text,
+      fontSize: 18,
+      fontWeight: '600',
+    },
+    emptySubtitle: {
+      color: colors.textMuted,
+      fontSize: 14,
+    },
+  });
+}

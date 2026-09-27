@@ -202,6 +202,7 @@ export interface NoticeItem {
   title: string;
   message: string;
   duration: NoticeDuration;
+  postedBy?: string;
   createdAt: string;
   expiresAt?: string | null;
   isActive: boolean;

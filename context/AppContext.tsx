@@ -9,6 +9,7 @@ import {
 import {
   mockUser, mockCampus, mockClassrooms, mockAlerts, mockNotifications, mockEnergyData, devsA101, defaultTimetable,
 } from '../mock_data/mockData';
+import { ThemeMode, ThemeColors, DarkColors, LightColors } from '../constants/colors';
 
 interface QuickControls {
   allLights: boolean;
@@ -59,6 +60,11 @@ interface AppContextType {
   timetable: TimetableConfig;
   updateTimetable: (config: TimetableConfig) => Promise<void>;
   triggerBellTest: (pattern?: BellPattern) => Promise<{ success: boolean; message: string }>;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
+  toggleTheme: () => void;
+  isDark: boolean;
+  colors: ThemeColors;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -78,6 +84,7 @@ const STORAGE_KEYS = {
   SYSTEM_MODE: '@system_mode',
   NOTICES: '@notices',
   TIMETABLE: '@timetable',
+  THEME_MODE: '@theme_mode',
 };
 
 const SETTING_KEYS = ['brightness', 'speed', 'temperature', 'mode', 'fanSpeed', 'volume', 'source', 'direction', 'colorTemp'] as const;
@@ -286,6 +293,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<NotificationItem[]>(mockNotifications);
   const [notices, setNotices] = useState<NoticeItem[]>([]);
   const [timetable, setTimetable] = useState<TimetableConfig>(defaultTimetable);
+  const [themeMode, setThemeModeState] = useState<ThemeMode>('dark');
   const [energyData, setEnergyData] = useState(mockEnergyData);
   const [quickControls, setQuickControls] = useState<QuickControls>({
     allLights: false, allFans: false, allCurtains: false,
@@ -306,6 +314,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const pendingUserToggleStateRef = useRef<Record<string, DeviceStatus>>({});
   const lastNoticeSyncRef = useRef<number>(0);
   const noticesRef = useRef<NoticeItem[]>([]);
+
+  const setThemeMode = useCallback((mode: ThemeMode) => {
+    setThemeModeState(mode);
+    AsyncStorage.setItem(STORAGE_KEYS.THEME_MODE, mode).catch(console.error);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setThemeModeState((prev) => {
+      const next: ThemeMode = prev === 'dark' ? 'light' : 'dark';
+      AsyncStorage.setItem(STORAGE_KEYS.THEME_MODE, next).catch(console.error);
+      return next;
+    });
+  }, []);
+
+  const isDark = themeMode === 'dark';
+  const colors = isDark ? DarkColors : LightColors;
 
   const setEsp32Ip = useCallback(async (ip: string) => {
     const trimmed = ip.trim();
@@ -448,6 +472,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const init = async () => {
       let ok = false;
+      try {
+        const storedTheme = await AsyncStorage.getItem(STORAGE_KEYS.THEME_MODE);
+        if (storedTheme === 'light' || storedTheme === 'dark') {
+          setThemeModeState(storedTheme as ThemeMode);
+        }
+      } catch (e) {
+        console.error('Failed to load theme preference:', e);
+      }
       try {
         ok = await loadFromSupabase();
       } catch (error) {
@@ -1793,6 +1825,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateEsp32WiFi,
       notices, addNotice, deleteNotice,
       timetable, updateTimetable, triggerBellTest,
+      themeMode, setThemeMode, toggleTheme, isDark, colors,
     }}>
       {children}
     </AppContext.Provider>
@@ -1803,4 +1836,9 @@ export function useApp(): AppContextType {
   const context = useContext(AppContext);
   if (!context) throw new Error('useApp must be used within AppProvider');
   return context;
+}
+
+export function useTheme() {
+  const { colors, isDark, themeMode, setThemeMode, toggleTheme } = useApp();
+  return { colors, isDark, themeMode, setThemeMode, toggleTheme };
 }

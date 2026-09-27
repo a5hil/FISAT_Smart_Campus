@@ -6,6 +6,8 @@ import { Layout } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
+import { useApp } from '../context/AppContext';
+
 interface DeviceCardProps {
   device: Device;
   classroomId?: string;
@@ -13,6 +15,7 @@ interface DeviceCardProps {
 }
 
 export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
+  const { colors, isDark } = useApp();
   const router = useRouter();
   const isOn = device.status === 'on';
   const isOffline = device.status === 'offline';
@@ -65,7 +68,10 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
     <TouchableOpacity 
       style={[
         styles.card,
-        isOn && !isOffline && styles.cardActive,
+        {
+          backgroundColor: isOn && !isOffline ? colors.primarySubtle : colors.card,
+          borderColor: isOn && !isOffline ? colors.primary : colors.surfaceBorder,
+        },
         isOffline && styles.cardOffline
       ]}
       activeOpacity={0.75}
@@ -76,13 +82,16 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
       <View style={styles.header}>
         <View style={[
           styles.iconContainer,
-          isOn && !isOffline && styles.iconContainerActive,
-          isOffline && styles.iconContainerOffline
+          {
+            backgroundColor: isOn && !isOffline
+              ? colors.primarySubtle
+              : (isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)'),
+          },
         ]}>
           <Ionicons 
             name={getIcon() as any} 
             size={20} 
-            color={isOffline ? Colors.textMuted : isOn ? Colors.primary : Colors.text} 
+            color={isOffline ? colors.textMuted : isOn ? colors.primary : colors.text} 
           />
         </View>
 
@@ -91,8 +100,8 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
             value={isOn}
             onValueChange={handleTilePress}
             disabled={isOffline}
-            trackColor={{ false: 'rgba(255, 255, 255, 0.15)', true: Colors.primary }}
-            thumbColor={isOn ? '#FFFFFF' : '#D1D5DB'}
+            trackColor={{ false: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)', true: colors.primary }}
+            thumbColor={isOn ? '#FFFFFF' : (isDark ? '#D1D5DB' : '#FFFFFF')}
             style={{ 
               transform: [{ scale: Platform.OS === 'ios' ? 0.95 : 1.15 }] 
             }}
@@ -103,10 +112,10 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
 
       <View style={styles.footer}>
         <View style={styles.info}>
-          <Text style={[styles.name, isOffline && styles.textOffline]} numberOfLines={1}>
+          <Text style={[styles.name, { color: isOffline ? colors.textMuted : colors.text }]} numberOfLines={1}>
             {device.name}
           </Text>
-          <Text style={styles.status}>
+          <Text style={[styles.status, { color: colors.textSecondary }]}>
             {getStatusText()}
           </Text>
         </View>
@@ -114,7 +123,11 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
         <TouchableOpacity
           style={[
             styles.settingsButton,
-            isOn && !isOffline && styles.settingsButtonActive
+            {
+              backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)',
+              borderColor: colors.surfaceBorder,
+            },
+            isOn && !isOffline && { borderColor: colors.primary, backgroundColor: colors.primarySubtle }
           ]}
           onPress={(e) => {
             e.stopPropagation?.();
@@ -126,7 +139,7 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
           <Ionicons 
             name="settings-outline" 
             size={14} 
-            color={isOn && !isOffline ? Colors.primary : Colors.textMuted} 
+            color={isOn && !isOffline ? colors.primary : colors.textMuted} 
           />
         </TouchableOpacity>
       </View>

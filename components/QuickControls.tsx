@@ -11,7 +11,9 @@ export function QuickControls() {
     toggleQuickControl, 
     emergencyOff, 
     systemMode, 
-    toggleEsp32Mode 
+    toggleEsp32Mode,
+    colors,
+    isDark,
   } = useApp();
 
   const handleEmergencyOff = () => {
@@ -26,10 +28,11 @@ export function QuickControls() {
   };
 
   const isAuto = systemMode === 'auto';
+  const activeBtnTextColor = isDark ? '#000000' : '#FFFFFF';
 
   return (
     <View style={styles.container}>
-      <Text style={styles.sectionTitle}>Quick Hardware Controls</Text>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>Quick Hardware Controls</Text>
       <ScrollView 
         horizontal 
         showsHorizontalScrollIndicator={false}
@@ -37,71 +40,101 @@ export function QuickControls() {
       >
         {/* Auto / Manual Mode Toggle */}
         <TouchableOpacity 
-          style={[styles.controlButton, isAuto ? styles.modeButtonAuto : styles.modeButtonManual]}
+          style={[
+            styles.controlButton,
+            {
+              backgroundColor: isAuto ? colors.successSubtle : colors.primarySubtle,
+              borderColor: isAuto ? colors.success : colors.primary,
+            }
+          ]}
           onPress={toggleEsp32Mode}
         >
           <Ionicons 
             name={isAuto ? "sparkles" : "hand-left"} 
             size={18} 
-            color={isAuto ? Colors.success : Colors.primary} 
+            color={isAuto ? colors.success : colors.primary} 
           />
-          <Text style={[styles.controlText, { color: isAuto ? Colors.success : Colors.primary }]}>
+          <Text style={[styles.controlText, { color: isAuto ? colors.success : colors.primary, fontWeight: '700' }]}>
             {isAuto ? 'Auto Mode' : 'Manual Mode'}
           </Text>
         </TouchableOpacity>
 
         {/* All Lights */}
         <TouchableOpacity 
-          style={[styles.controlButton, quickControls.allLights && styles.controlButtonActive]}
+          style={[
+            styles.controlButton,
+            {
+              backgroundColor: quickControls.allLights ? colors.primary : colors.card,
+              borderColor: quickControls.allLights ? colors.primary : colors.surfaceBorder,
+            }
+          ]}
           onPress={() => toggleQuickControl('allLights')}
         >
           <Ionicons 
             name={quickControls.allLights ? "bulb" : "bulb-outline"} 
             size={18} 
-            color={quickControls.allLights ? '#000' : Colors.text} 
+            color={quickControls.allLights ? activeBtnTextColor : colors.text} 
           />
-          <Text style={[styles.controlText, quickControls.allLights && styles.controlTextActive]}>
+          <Text style={[styles.controlText, { color: quickControls.allLights ? activeBtnTextColor : colors.text }]}>
             All Lights
           </Text>
         </TouchableOpacity>
 
         {/* All Fans */}
         <TouchableOpacity 
-          style={[styles.controlButton, quickControls.allFans && styles.controlButtonActive]}
+          style={[
+            styles.controlButton,
+            {
+              backgroundColor: quickControls.allFans ? colors.primary : colors.card,
+              borderColor: quickControls.allFans ? colors.primary : colors.surfaceBorder,
+            }
+          ]}
           onPress={() => toggleQuickControl('allFans')}
         >
           <Ionicons 
             name="hardware-chip-outline" 
             size={18} 
-            color={quickControls.allFans ? '#000' : Colors.text} 
+            color={quickControls.allFans ? activeBtnTextColor : colors.text} 
           />
-          <Text style={[styles.controlText, quickControls.allFans && styles.controlTextActive]}>
+          <Text style={[styles.controlText, { color: quickControls.allFans ? activeBtnTextColor : colors.text }]}>
             All Fans
           </Text>
         </TouchableOpacity>
 
         {/* All Curtains */}
         <TouchableOpacity 
-          style={[styles.controlButton, quickControls.allCurtains && styles.controlButtonActive]}
+          style={[
+            styles.controlButton,
+            {
+              backgroundColor: quickControls.allCurtains ? colors.primary : colors.card,
+              borderColor: quickControls.allCurtains ? colors.primary : colors.surfaceBorder,
+            }
+          ]}
           onPress={() => toggleQuickControl('allCurtains')}
         >
           <Ionicons 
             name="apps-outline" 
             size={18} 
-            color={quickControls.allCurtains ? '#000' : Colors.text} 
+            color={quickControls.allCurtains ? activeBtnTextColor : colors.text} 
           />
-          <Text style={[styles.controlText, quickControls.allCurtains && styles.controlTextActive]}>
+          <Text style={[styles.controlText, { color: quickControls.allCurtains ? activeBtnTextColor : colors.text }]}>
             All Curtains
           </Text>
         </TouchableOpacity>
 
         {/* Emergency All Off */}
         <TouchableOpacity 
-          style={[styles.controlButton, styles.emergencyButton]}
+          style={[
+            styles.controlButton,
+            {
+              backgroundColor: colors.criticalSubtle,
+              borderColor: colors.critical,
+            }
+          ]}
           onPress={handleEmergencyOff}
         >
-          <Ionicons name="power" size={18} color={Colors.critical} />
-          <Text style={[styles.controlText, { color: Colors.critical }]}>Emergency Off</Text>
+          <Ionicons name="power" size={18} color={colors.critical} />
+          <Text style={[styles.controlText, { color: colors.critical, fontWeight: '700' }]}>Emergency Off</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>

@@ -4,16 +4,19 @@ import { Colors } from '../../constants/colors';
 import { Layout } from '../../constants/layout';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { ClassroomCard } from '../../components/ClassroomCard';
-import { useApp } from '../../context/AppContext';
+import { useApp, useTheme } from '../../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 
 type FilterType = 'All' | 'Occupied' | 'Vacant' | 'Offline';
 
 export default function ClassroomsScreen() {
   const { classrooms } = useApp();
+  const { colors, isDark } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<FilterType>('All');
   const [isSearching, setIsSearching] = useState(false);
+
+  const styles = React.useMemo(() => getStyles(colors, isDark), [colors, isDark]);
 
   const filteredClassrooms = classrooms.filter(cls => {
     // Text search
@@ -35,7 +38,7 @@ export default function ClassroomsScreen() {
         title="Classrooms" 
         rightElement={
           <TouchableOpacity onPress={() => setIsSearching(!isSearching)}>
-            <Ionicons name="search" size={24} color={Colors.text} />
+            <Ionicons name="search" size={24} color={colors.text} />
           </TouchableOpacity>
         }
       />
@@ -43,18 +46,18 @@ export default function ClassroomsScreen() {
       {isSearching && (
         <View style={styles.searchContainer}>
           <View style={styles.searchBar}>
-            <Ionicons name="search" size={20} color={Colors.textMuted} />
+            <Ionicons name="search" size={20} color={colors.textMuted} />
             <TextInput
               style={styles.searchInput}
               placeholder="Search classrooms..."
-              placeholderTextColor={Colors.textMuted}
+              placeholderTextColor={colors.inputPlaceholder}
               value={searchQuery}
               onChangeText={setSearchQuery}
               autoFocus
             />
             {searchQuery.length > 0 && (
               <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <Ionicons name="close-circle" size={20} color={Colors.textMuted} />
+                <Ionicons name="close-circle" size={20} color={colors.textMuted} />
               </TouchableOpacity>
             )}
           </View>
@@ -93,7 +96,7 @@ export default function ClassroomsScreen() {
           ))
         ) : (
           <View style={styles.emptyState}>
-            <Ionicons name="business-outline" size={48} color={Colors.surfaceTranslucent} />
+            <Ionicons name="business-outline" size={48} color={colors.textMuted} />
             <Text style={styles.emptyTitle}>No classrooms found</Text>
             <Text style={styles.emptySubtitle}>Try adjusting your search or filters.</Text>
           </View>
@@ -106,75 +109,77 @@ export default function ClassroomsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  searchContainer: {
-    paddingHorizontal: Layout.spacing.md,
-    marginBottom: 16,
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-  },
-  searchInput: {
-    flex: 1,
-    color: Colors.text,
-    fontSize: 16,
-    marginLeft: 8,
-  },
-  filtersContainer: {
-    marginBottom: 16,
-  },
-  filtersScroll: {
-    paddingHorizontal: Layout.spacing.md,
-    gap: 8,
-  },
-  filterChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: Layout.radius.round,
-    backgroundColor: Colors.card,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-  },
-  filterChipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  filterText: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  filterTextActive: {
-    color: '#000',
-  },
-  listContainer: {
-    paddingHorizontal: Layout.spacing.md,
-  },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 64,
-  },
-  emptyTitle: {
-    color: Colors.text,
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    color: Colors.textMuted,
-    fontSize: 14,
-  },
-});
+function getStyles(colors: any, isDark: boolean) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    searchContainer: {
+      paddingHorizontal: Layout.spacing.md,
+      marginBottom: 16,
+    },
+    searchBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.md,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    searchInput: {
+      flex: 1,
+      color: colors.text,
+      fontSize: 16,
+      marginLeft: 8,
+    },
+    filtersContainer: {
+      marginBottom: 16,
+    },
+    filtersScroll: {
+      paddingHorizontal: Layout.spacing.md,
+      gap: 8,
+    },
+    filterChip: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: Layout.radius.round,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    filterChipActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    filterText: {
+      color: colors.textSecondary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    filterTextActive: {
+      color: isDark ? '#000000' : '#FFFFFF',
+    },
+    listContainer: {
+      paddingHorizontal: Layout.spacing.md,
+    },
+    emptyState: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingTop: 64,
+    },
+    emptyTitle: {
+      color: colors.text,
+      fontSize: 18,
+      fontWeight: '600',
+      marginTop: 16,
+      marginBottom: 8,
+    },
+    emptySubtitle: {
+      color: colors.textMuted,
+      fontSize: 14,
+    },
+  });
+}

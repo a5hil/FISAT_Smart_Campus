@@ -8,34 +8,34 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function HomeHeader() {
-  const { user, campus, notifications } = useApp();
+  const { user, campus, notifications, colors } = useApp();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   return (
-    <View style={[styles.container, { paddingTop: Math.max(insets.top, 16) }]}>
+    <View style={[styles.container, { paddingTop: Math.max(insets.top, 16), backgroundColor: colors.background }]}>
       <View style={styles.left}>
-        <View style={styles.avatarContainer}>
-          <Text style={styles.avatarText}>{user.initials}</Text>
+        <View style={[styles.avatarContainer, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}>
+          <Text style={[styles.avatarText, { color: colors.primary }]}>{user.initials}</Text>
         </View>
         <View style={styles.textContainer}>
-          <Text style={styles.greeting}>Hello, {user.name.split(' ')[0]}</Text>
+          <Text style={[styles.greeting, { color: colors.text }]}>Hello, {user.name.split(' ')[0]}</Text>
           <View style={styles.campusRow}>
-            <Ionicons name="location" size={14} color={Colors.textMuted} />
-            <Text style={styles.campusName}>{campus.name} • {campus.department}</Text>
+            <Ionicons name="location" size={14} color={colors.textMuted} />
+            <Text style={[styles.campusName, { color: colors.textSecondary }]}>{campus.name} • {campus.department}</Text>
           </View>
         </View>
       </View>
       
       <TouchableOpacity 
-        style={styles.bellButton}
+        style={[styles.bellButton, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}
         onPress={() => router.push('/notifications')}
       >
-        <Ionicons name="notifications-outline" size={24} color={Colors.text} />
+        <Ionicons name="notifications-outline" size={24} color={colors.text} />
         {unreadCount > 0 && (
-          <View style={styles.badge}>
+          <View style={[styles.badge, { borderColor: colors.background }]}>
             <Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
           </View>
         )}
@@ -51,7 +51,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: Layout.spacing.md,
     paddingBottom: 16,
-    backgroundColor: Colors.background,
   },
   left: {
     flexDirection: 'row',
@@ -61,13 +60,12 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: Colors.surfaceTranslucent,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+    borderWidth: 1,
   },
   avatarText: {
-    color: Colors.text,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -75,7 +73,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   greeting: {
-    color: Colors.text,
     fontSize: 20,
     fontWeight: '700',
     marginBottom: 2,
@@ -86,24 +83,21 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   campusName: {
-    color: Colors.textMuted,
     fontSize: 13,
   },
   bellButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: Colors.card,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
   },
   badge: {
     position: 'absolute',
     top: -2,
     right: -2,
-    backgroundColor: Colors.critical,
+    backgroundColor: '#FF625F',
     minWidth: 18,
     height: 18,
     borderRadius: 9,
@@ -111,7 +105,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 4,
     borderWidth: 2,
-    borderColor: Colors.background,
   },
   badgeText: {
     color: '#FFF',

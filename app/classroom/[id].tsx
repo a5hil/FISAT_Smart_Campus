@@ -7,13 +7,16 @@ import { ScreenHeader } from '../../components/ScreenHeader';
 import { DeviceCard } from '../../components/DeviceCard';
 import { NoticeBoardCard } from '../../components/NoticeBoardCard';
 import { FloatingBottomNav } from '../../components/FloatingBottomNav';
-import { useApp } from '../../context/AppContext';
+import { useApp, useTheme } from '../../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function ClassroomDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { classrooms, toggleDevice, esp32Connected, esp32Ip } = useApp();
+  const { colors, isDark } = useTheme();
   const router = useRouter();
+
+  const styles = React.useMemo(() => getStyles(colors, isDark), [colors, isDark]);
 
   const classroom = classrooms.find(
     c => c.id === id || c.id === `cls-${id}` || c.number?.toLowerCase() === id?.toLowerCase()
@@ -55,7 +58,7 @@ export default function ClassroomDetailScreen() {
             style={styles.iconButton}
             onPress={() => router.push('/(tabs)/settings')}
           >
-            <Ionicons name="settings-outline" size={24} color={Colors.text} />
+            <Ionicons name="settings-outline" size={24} color={colors.text} />
           </TouchableOpacity>
         }
       />
@@ -63,8 +66,8 @@ export default function ClassroomDetailScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.infoCardsRow}>
           <View style={styles.infoCard}>
-            <View style={[styles.infoIcon, { backgroundColor: isOccupied ? 'rgba(76, 175, 80, 0.15)' : 'rgba(255, 255, 255, 0.1)' }]}>
-              <Ionicons name="people" size={20} color={isOccupied ? Colors.success : Colors.textMuted} />
+            <View style={[styles.infoIcon, { backgroundColor: isOccupied ? (isDark ? 'rgba(76, 175, 80, 0.15)' : 'rgba(21, 128, 61, 0.12)') : (isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)') }]}>
+              <Ionicons name="people" size={20} color={isOccupied ? colors.success : colors.textMuted} />
             </View>
             <View>
               <Text style={styles.infoLabel}>Occupancy</Text>
@@ -73,8 +76,8 @@ export default function ClassroomDetailScreen() {
           </View>
 
           <View style={styles.infoCard}>
-            <View style={[styles.infoIcon, { backgroundColor: 'rgba(253, 168, 58, 0.15)' }]}>
-              <Ionicons name="flash" size={20} color={Colors.primary} />
+            <View style={[styles.infoIcon, { backgroundColor: isDark ? 'rgba(253, 168, 58, 0.15)' : 'rgba(217, 119, 6, 0.12)' }]}>
+              <Ionicons name="flash" size={20} color={colors.primary} />
             </View>
             <View>
               <Text style={styles.infoLabel}>Current Load</Text>
@@ -89,19 +92,19 @@ export default function ClassroomDetailScreen() {
         {isEsp32Controlled && (
           <View style={styles.hardwareBanner}>
             <View style={styles.hardwareLeft}>
-              <View style={[styles.hardwareDot, { backgroundColor: esp32Connected ? Colors.success : Colors.warning }]} />
+              <View style={[styles.hardwareDot, { backgroundColor: esp32Connected ? colors.success : colors.warning }]} />
               <View>
                 <Text style={styles.hardwareTitle}>ESP32 Controller ({esp32Connected ? 'Live' : 'Standby'})</Text>
                 <Text style={styles.hardwareSubtitle}>Controlled via App • {esp32Ip || 'Auto-Detected'}</Text>
               </View>
             </View>
-            <Ionicons name="hardware-chip-outline" size={20} color={Colors.primary} />
+            <Ionicons name="hardware-chip-outline" size={20} color={colors.primary} />
           </View>
         )}
 
         {isOffline && !isEsp32Controlled && (
           <View style={styles.offlineBanner}>
-            <Ionicons name="warning" size={24} color={Colors.critical} />
+            <Ionicons name="warning" size={24} color={colors.critical} />
             <View style={styles.offlineTextContainer}>
               <Text style={styles.offlineTitle}>Controller Offline</Text>
               <Text style={styles.offlineDesc}>Last seen: {new Date(classroom.controller.lastSeen).toLocaleTimeString()}</Text>
@@ -115,7 +118,7 @@ export default function ClassroomDetailScreen() {
             <View style={styles.meterHeader}>
               <View style={styles.meterTitleRow}>
                 <View style={styles.meterIconBox}>
-                  <Ionicons name="speedometer-outline" size={20} color={Colors.primary} />
+                  <Ionicons name="speedometer-outline" size={20} color={colors.primary} />
                 </View>
                 <View>
                   <Text style={styles.meterTitle}>Real-Time Energy Meter</Text>
@@ -123,8 +126,8 @@ export default function ClassroomDetailScreen() {
                 </View>
               </View>
               <View style={styles.meterLiveTag}>
-                <View style={[styles.hardwareDot, { backgroundColor: esp32Connected ? Colors.success : Colors.textMuted }]} />
-                <Text style={[styles.meterLiveText, { color: esp32Connected ? Colors.success : Colors.textMuted }]}>
+                <View style={[styles.hardwareDot, { backgroundColor: esp32Connected ? colors.success : colors.textMuted }]} />
+                <Text style={[styles.meterLiveText, { color: esp32Connected ? colors.success : colors.textMuted }]}>
                   {esp32Connected ? 'LIVE MONITOR' : 'STANDBY'}
                 </Text>
               </View>
@@ -151,7 +154,7 @@ export default function ClassroomDetailScreen() {
 
               <View style={styles.meterStatBox}>
                 <Text style={styles.meterStatLabel}>Active Load</Text>
-                <Text style={[styles.meterStatValue, { color: Colors.primary }]}>
+                <Text style={[styles.meterStatValue, { color: colors.primary }]}>
                   {classroom.currentLoad.toFixed(1)}
                   <Text style={styles.meterStatUnit}> W</Text>
                 </Text>
@@ -192,219 +195,221 @@ export default function ClassroomDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: Colors.background, 
-  },
-  iconButton: {
-    padding: 8,
-  },
-  scrollContent: {
-    padding: Layout.spacing.md,
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyTitle: {
-    color: Colors.text,
-    fontSize: 18,
-  },
-  infoCardsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 24,
-  },
-  infoCard: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.lg,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-    gap: 12,
-  },
-  infoIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  infoLabel: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    marginBottom: 2,
-  },
-  infoValue: {
-    color: Colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  offlineBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 98, 95, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 98, 95, 0.3)',
-    padding: 16,
-    borderRadius: Layout.radius.md,
-    marginBottom: 24,
-    gap: 12,
-  },
-  hardwareBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(253, 168, 58, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(253, 168, 58, 0.3)',
-    padding: 14,
-    borderRadius: Layout.radius.md,
-    marginBottom: 24,
-  },
-  hardwareLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  hardwareDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  hardwareTitle: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  hardwareSubtitle: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  offlineTextContainer: {
-    flex: 1,
-  },
-  offlineTitle: {
-    color: Colors.critical,
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  offlineDesc: {
-    color: Colors.textMuted,
-    fontSize: 13,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    color: Colors.text,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  deviceGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  meterCard: {
-    backgroundColor: '#1E1D1B',
-    borderRadius: Layout.radius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(253, 168, 58, 0.25)',
-    padding: 16,
-    marginBottom: 24,
-  },
-  meterHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-    marginBottom: 14,
-  },
-  meterTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  meterIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(253, 168, 58, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  meterTitle: {
-    color: Colors.text,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  meterSubtitle: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    marginTop: 1,
-  },
-  meterLiveTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 6,
-  },
-  meterLiveText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  meterStatsGrid: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  meterStatBox: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    borderRadius: Layout.radius.md,
-    padding: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  meterStatLabel: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '500',
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  meterStatValue: {
-    color: Colors.text,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  meterStatUnit: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: Colors.textMuted,
-  },
-  meterStatSub: {
-    color: Colors.textMuted,
-    fontSize: 10,
-    marginTop: 2,
-    opacity: 0.7,
-  },
-});
+function getStyles(colors: any, isDark: boolean) {
+  return StyleSheet.create({
+    container: { 
+      flex: 1, 
+      backgroundColor: colors.background, 
+    },
+    iconButton: {
+      padding: 8,
+    },
+    scrollContent: {
+      padding: Layout.spacing.md,
+    },
+    emptyState: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    emptyTitle: {
+      color: colors.text,
+      fontSize: 18,
+    },
+    infoCardsRow: {
+      flexDirection: 'row',
+      gap: 12,
+      marginBottom: 24,
+    },
+    infoCard: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      gap: 12,
+    },
+    infoIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    infoLabel: {
+      color: colors.textMuted,
+      fontSize: 12,
+      marginBottom: 2,
+    },
+    infoValue: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    offlineBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(255, 98, 95, 0.1)',
+      borderWidth: 1,
+      borderColor: 'rgba(255, 98, 95, 0.3)',
+      padding: 16,
+      borderRadius: Layout.radius.md,
+      marginBottom: 24,
+      gap: 12,
+    },
+    hardwareBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.08)' : 'rgba(217, 119, 6, 0.08)',
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(253, 168, 58, 0.3)' : 'rgba(217, 119, 6, 0.25)',
+      padding: 14,
+      borderRadius: Layout.radius.md,
+      marginBottom: 24,
+    },
+    hardwareLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      flex: 1,
+    },
+    hardwareDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+    },
+    hardwareTitle: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    hardwareSubtitle: {
+      color: colors.textMuted,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    offlineTextContainer: {
+      flex: 1,
+    },
+    offlineTitle: {
+      color: colors.critical,
+      fontSize: 15,
+      fontWeight: '600',
+      marginBottom: 2,
+    },
+    offlineDesc: {
+      color: colors.textMuted,
+      fontSize: 13,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    sectionTitle: {
+      color: colors.text,
+      fontSize: 18,
+      fontWeight: '600',
+    },
+    deviceGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'space-between',
+    },
+    meterCard: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(253, 168, 58, 0.25)' : 'rgba(217, 119, 6, 0.25)',
+      padding: 16,
+      marginBottom: 24,
+    },
+    meterHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingBottom: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.surfaceBorder,
+      marginBottom: 14,
+    },
+    meterTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    meterIconBox: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.15)' : 'rgba(217, 119, 6, 0.12)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    meterTitle: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    meterSubtitle: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginTop: 1,
+    },
+    meterLiveTag: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.05)',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 12,
+      gap: 6,
+    },
+    meterLiveText: {
+      fontSize: 10,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
+    meterStatsGrid: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    meterStatBox: {
+      flex: 1,
+      backgroundColor: isDark ? 'rgba(0, 0, 0, 0.25)' : colors.cardSecondary,
+      borderRadius: Layout.radius.md,
+      padding: 12,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    meterStatLabel: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '500',
+      marginBottom: 4,
+      textAlign: 'center',
+    },
+    meterStatValue: {
+      color: colors.text,
+      fontSize: 18,
+      fontWeight: '800',
+    },
+    meterStatUnit: {
+      fontSize: 12,
+      fontWeight: '500',
+      color: colors.textMuted,
+    },
+    meterStatSub: {
+      color: colors.textMuted,
+      fontSize: 10,
+      marginTop: 2,
+      opacity: 0.7,
+    },
+  });
+}

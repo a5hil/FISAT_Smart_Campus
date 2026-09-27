@@ -42,7 +42,10 @@ const STANDALONE_TABS: { key: string; name: 'index' | 'classrooms' | 'announceme
   { key: 'settings', name: 'settings', label: 'Settings', href: '/(tabs)/settings' },
 ];
 
+import { useApp } from '../context/AppContext';
+
 export function FloatingBottomNav({ state, descriptors, navigation, activeTab }: FloatingBottomNavProps) {
+  const { colors, isDark } = useApp();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -66,14 +69,26 @@ export function FloatingBottomNav({ state, descriptors, navigation, activeTab }:
   };
   const standaloneActive = getStandaloneActiveTab();
 
+  const navBg = isDark
+    ? (Platform.OS === 'android' ? 'rgba(30, 30, 30, 0.88)' : 'rgba(15, 15, 15, 0.65)')
+    : (Platform.OS === 'android' ? 'rgba(255, 255, 255, 0.96)' : 'rgba(255, 255, 255, 0.88)');
+
+  const inactiveBtnBg = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)';
+
   return (
     <View style={[styles.container, { bottom: bottomPadding, left: (width - navWidth) / 2 }]}>
       <BlurView
         intensity={Platform.OS === 'ios' ? 80 : 100}
-        tint="dark"
+        tint={isDark ? 'dark' : 'light'}
         style={[
           styles.blurContainer,
-          { width: navWidth, height: isFiveTabs ? 72 : Layout.nav.height, borderRadius: isFiveTabs ? 36 : 41 },
+          {
+            width: navWidth,
+            height: isFiveTabs ? 72 : Layout.nav.height,
+            borderRadius: isFiveTabs ? 36 : 41,
+            backgroundColor: navBg,
+            borderColor: colors.surfaceBorder,
+          },
         ]}
         blurMethod="none"
       >
@@ -107,15 +122,19 @@ export function FloatingBottomNav({ state, descriptors, navigation, activeTab }:
                     onPress={onPress}
                     style={[
                       styles.tabButton,
-                      { width: btnSize, height: btnSize, borderRadius: btnSize / 2 },
-                      isFocused && styles.tabButtonActive,
+                      {
+                        width: btnSize,
+                        height: btnSize,
+                        borderRadius: btnSize / 2,
+                        backgroundColor: isFocused ? colors.primary : inactiveBtnBg,
+                      },
                     ]}
                     activeOpacity={0.7}
                   >
                     <Ionicons
                       name={iconName}
                       size={isFiveTabs ? 22 : 24}
-                      color={Colors.text}
+                      color={isFocused ? '#FFFFFF' : colors.textSecondary}
                     />
                   </TouchableOpacity>
                 );
@@ -138,15 +157,19 @@ export function FloatingBottomNav({ state, descriptors, navigation, activeTab }:
                     onPress={onPress}
                     style={[
                       styles.tabButton,
-                      { width: btnSize, height: btnSize, borderRadius: btnSize / 2 },
-                      isFocused && styles.tabButtonActive,
+                      {
+                        width: btnSize,
+                        height: btnSize,
+                        borderRadius: btnSize / 2,
+                        backgroundColor: isFocused ? colors.primary : inactiveBtnBg,
+                      },
                     ]}
                     activeOpacity={0.7}
                   >
                     <Ionicons
                       name={iconName}
                       size={isFiveTabs ? 22 : 24}
-                      color={Colors.text}
+                      color={isFocused ? '#FFFFFF' : colors.textSecondary}
                     />
                   </TouchableOpacity>
                 );

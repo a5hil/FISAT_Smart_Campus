@@ -16,6 +16,8 @@ export function Esp32LiveBar() {
     syncWithEsp32, 
     showToast,
     classrooms,
+    colors,
+    isDark,
   } = useApp();
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -53,69 +55,68 @@ export function Esp32LiveBar() {
   const cloudActiveDevices = classrooms.reduce((acc, c) => acc + c.devices.filter(d => d.status === 'on').length, 0);
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}>
       <View style={styles.header}>
         <View style={styles.titleRow}>
-          <View style={[styles.iconContainer, esp32Connected ? styles.iconConnected : styles.iconOffline]}>
-            <Ionicons name="hardware-chip" size={18} color={esp32Connected ? Colors.success : Colors.textMuted} />
+          <View style={[styles.iconContainer, esp32Connected ? { backgroundColor: colors.successSubtle } : { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)' }]}>
+            <Ionicons name="hardware-chip" size={18} color={esp32Connected ? colors.success : colors.textMuted} />
           </View>
           <View>
-            <Text style={styles.title}>Classroom Automation Hub</Text>
-            <Text style={styles.subtitle}>
+            <Text style={[styles.title, { color: colors.text }]}>Classroom Automation Hub</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               IP: {esp32Ip || 'Auto-Detected'} • Cloud Synced
             </Text>
           </View>
         </View>
 
-        <View style={[styles.badge, esp32Connected ? styles.badgeConnected : styles.badgeOffline]}>
-          <View style={[styles.dot, { backgroundColor: esp32Connected ? Colors.success : Colors.critical }]} />
-          <Text style={[styles.badgeText, { color: esp32Connected ? Colors.success : Colors.textMuted }]}>
+        <View style={[styles.badge, esp32Connected ? { backgroundColor: colors.successSubtle, borderColor: colors.successSubtle } : { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)', borderColor: colors.surfaceBorder }]}>
+          <View style={[styles.dot, { backgroundColor: esp32Connected ? colors.success : colors.critical }]} />
+          <Text style={[styles.badgeText, { color: esp32Connected ? colors.success : colors.textMuted }]}>
             {esp32Connected ? (esp32Telemetry ? 'LAN LIVE' : 'CLOUD LIVE') : 'OFFLINE'}
           </Text>
         </View>
       </View>
-
       {/* Live Telemetry preview when connected (LAN or Cloud) */}
       {esp32Connected && (
-        <View style={styles.metricsRow}>
+        <View style={[styles.metricsRow, { backgroundColor: colors.cardSecondary }]}>
           <TouchableOpacity 
-            style={styles.metricItem} 
+            style={[styles.metricItem, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]} 
             onPress={toggleEsp32Mode}
             activeOpacity={0.7}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Text style={styles.metricLabel}>Mode</Text>
+              <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>Mode</Text>
               <Ionicons 
                 name={systemMode === 'auto' ? "sparkles" : "hand-left"} 
                 size={11} 
-                color={systemMode === 'auto' ? Colors.success : Colors.primary} 
+                color={systemMode === 'auto' ? colors.success : colors.primary} 
               />
             </View>
-            <Text style={[styles.metricValue, { color: systemMode === 'auto' ? Colors.success : Colors.primary }]}>
+            <Text style={[styles.metricValue, { color: systemMode === 'auto' ? colors.success : colors.primary }]}>
               {systemMode.toUpperCase()}
             </Text>
           </TouchableOpacity>
-          <View style={styles.metricItem}>
-            <Text style={styles.metricLabel}>Temp</Text>
-            <Text style={styles.metricValue}>{(esp32Telemetry ? esp32Telemetry.temperature : cloudTemp).toFixed(1)}°C</Text>
+          <View style={[styles.metricItem, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}>
+            <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>Temp</Text>
+            <Text style={[styles.metricValue, { color: colors.text }]}>{(esp32Telemetry ? esp32Telemetry.temperature : cloudTemp).toFixed(1)}°C</Text>
           </View>
-          <View style={styles.metricItem}>
-            <Text style={styles.metricLabel}>{esp32Telemetry ? 'Humidity' : 'Active Devs'}</Text>
-            <Text style={styles.metricValue}>{esp32Telemetry ? `${Math.round(esp32Telemetry.humidity)}%` : `${cloudActiveDevices} ON`}</Text>
+          <View style={[styles.metricItem, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}>
+            <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>{esp32Telemetry ? 'Humidity' : 'Active Devs'}</Text>
+            <Text style={[styles.metricValue, { color: colors.text }]}>{esp32Telemetry ? `${Math.round(esp32Telemetry.humidity)}%` : `${cloudActiveDevices} ON`}</Text>
           </View>
-          <View style={styles.metricItem}>
-            <Text style={styles.metricLabel}>Active Load</Text>
-            <Text style={styles.metricValue}>{Math.round(esp32Telemetry ? esp32Telemetry.totalLoadWatts : cloudLoadWatts)} W</Text>
+          <View style={[styles.metricItem, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}>
+            <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>Active Load</Text>
+            <Text style={[styles.metricValue, { color: colors.text }]}>{Math.round(esp32Telemetry ? esp32Telemetry.totalLoadWatts : cloudLoadWatts)} W</Text>
           </View>
         </View>
       )}
 
       {/* Classroom A101 AC Power Meter Live Badge */}
       {esp32Connected && esp32Telemetry?.c1.hasPowerMeter && esp32Telemetry.c1.voltage !== undefined && (
-        <View style={styles.a101MeterStrip}>
-          <Ionicons name="flash" size={13} color={Colors.primary} />
-          <Text style={styles.a101MeterText}>
-            <Text style={{ fontWeight: '700', color: Colors.text }}>A101 Meter: </Text>
+        <View style={[styles.a101MeterStrip, { backgroundColor: colors.primarySubtle, borderColor: colors.primarySubtle }]}>
+          <Ionicons name="flash" size={13} color={colors.primary} />
+          <Text style={[styles.a101MeterText, { color: colors.textSecondary }]}>
+            <Text style={{ fontWeight: '700', color: colors.text }}>A101 Meter: </Text>
             {esp32Telemetry.c1.voltage.toFixed(0)}V • {esp32Telemetry.c1.current?.toFixed(2) || '0.00'}A • {esp32Telemetry.c1.loadWatts.toFixed(0)}W
           </Text>
         </View>
@@ -124,29 +125,35 @@ export function Esp32LiveBar() {
       {/* Action Buttons */}
       <View style={styles.actionsRow}>
         <TouchableOpacity 
-          style={styles.actionBtnPrimary}
+          style={[styles.actionBtnPrimary, { backgroundColor: colors.primary }]}
           onPress={handleManualSync}
           disabled={syncing}
           activeOpacity={0.8}
         >
           {syncing ? (
-            <ActivityIndicator size="small" color="#000" />
+            <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Ionicons name="refresh" size={16} color="#000" />
+            <Ionicons name="refresh" size={16} color="#FFFFFF" />
           )}
-          <Text style={styles.actionBtnPrimaryText}>Sync Live State</Text>
+          <Text style={[styles.actionBtnPrimaryText, { color: '#FFFFFF' }]}>Sync Live State</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 
-          style={styles.actionBtnSecondary}
+          style={[
+            styles.actionBtnSecondary,
+            {
+              backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+              borderColor: colors.surfaceBorder,
+            }
+          ]}
           onPress={() => {
             setInputIp(esp32Ip);
             setModalVisible(true);
           }}
           activeOpacity={0.8}
         >
-          <Ionicons name="settings-outline" size={16} color={Colors.primary} />
-          <Text style={styles.actionBtnSecondaryText}>IP Setup</Text>
+          <Ionicons name="settings-outline" size={16} color={colors.primary} />
+          <Text style={[styles.actionBtnSecondaryText, { color: colors.primary }]}>IP Setup</Text>
         </TouchableOpacity>
       </View>
 
@@ -157,19 +164,26 @@ export function Esp32LiveBar() {
         animationType="fade"
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Controller Hub IP</Text>
-            <Text style={styles.modalSubtitle}>
+        <View style={[styles.modalBackdrop, { backgroundColor: colors.modalOverlay }]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Controller Hub IP</Text>
+            <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
               Enter the network IP address of your classroom automation hub (displayed on device startup screen or router):
             </Text>
 
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                  color: colors.text,
+                },
+              ]}
               value={inputIp}
               onChangeText={setInputIp}
               placeholder="e.g. 192.168.1.101"
-              placeholderTextColor={Colors.textMuted}
+              placeholderTextColor={colors.textMuted}
               keyboardType="numeric"
               autoCapitalize="none"
               autoCorrect={false}
@@ -177,21 +191,20 @@ export function Esp32LiveBar() {
 
             <View style={styles.modalButtons}>
               <TouchableOpacity 
-                style={styles.modalCancelBtn}
+                style={[styles.modalCancelBtn, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)' }]}
                 onPress={() => setModalVisible(false)}
               >
-                <Text style={styles.modalCancelText}>Cancel</Text>
+                <Text style={[styles.modalCancelText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
-
               <TouchableOpacity 
-                style={styles.modalSaveBtn}
+                style={[styles.modalSaveBtn, { backgroundColor: colors.primary }]}
                 onPress={handleSaveIp}
                 disabled={testing}
               >
                 {testing ? (
-                  <ActivityIndicator size="small" color="#000" />
+                  <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.modalSaveText}>Connect & Save</Text>
+                  <Text style={[styles.modalSaveText, { color: '#FFFFFF' }]}>Connect & Save</Text>
                 )}
               </TouchableOpacity>
             </View>

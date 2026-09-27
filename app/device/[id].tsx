@@ -5,13 +5,16 @@ import { Colors } from '../../constants/colors';
 import { Layout } from '../../constants/layout';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { FloatingBottomNav } from '../../components/FloatingBottomNav';
-import { useApp } from '../../context/AppContext';
+import { useApp, useTheme } from '../../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function DeviceDetailScreen() {
   const { id, classroomId } = useLocalSearchParams<{ id: string; classroomId: string }>();
   const { classrooms, toggleDevice, esp32Connected, esp32Ip, updateDeviceRatedPower } = useApp();
+  const { colors, isDark } = useTheme();
   const router = useRouter();
+
+  const styles = React.useMemo(() => getStyles(colors, isDark), [colors, isDark]);
 
   const classroom = classroomId
     ? classrooms.find(c => c.id === classroomId)
@@ -134,14 +137,14 @@ export default function DeviceDetailScreen() {
         <View style={[styles.powerCard, isOn && styles.powerCardActive]}>
           <View style={styles.powerCardHeader}>
             <View style={[styles.deviceIconLarge, isOn && styles.deviceIconLargeActive]}>
-              <Ionicons name={getIcon() as any} size={32} color={isOn ? Colors.primary : Colors.text} />
+              <Ionicons name={getIcon() as any} size={32} color={isOn ? colors.primary : colors.text} />
             </View>
             <View style={styles.powerInfo}>
               <Text style={styles.deviceName}>{device.name}</Text>
               <Text style={styles.deviceLocation}>{classroom.name} • {device.roomArea}</Text>
               <View style={styles.statusBadgeRow}>
-                <View style={[styles.dot, { backgroundColor: isOffline ? Colors.critical : isOn ? Colors.success : Colors.textMuted }]} />
-                <Text style={[styles.statusText, { color: isOffline ? Colors.critical : isOn ? Colors.success : Colors.textMuted }]}>
+                <View style={[styles.dot, { backgroundColor: isOffline ? colors.critical : isOn ? colors.success : colors.textMuted }]} />
+                <Text style={[styles.statusText, { color: isOffline ? colors.critical : isOn ? colors.success : colors.textMuted }]}>
                   {getStatusLabel()}
                 </Text>
               </View>
@@ -156,8 +159,8 @@ export default function DeviceDetailScreen() {
               value={isOn}
               onValueChange={() => toggleDevice(classroom.id, device.id)}
               disabled={isOffline}
-              trackColor={{ false: Colors.surfaceTranslucent, true: Colors.primary }}
-              thumbColor={'#FFF'}
+              trackColor={{ false: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)', true: colors.primary }}
+              thumbColor={isOn ? '#FFF' : (isDark ? '#DDD' : '#F1F5F9')}
             />
           </View>
         </View>
@@ -166,7 +169,7 @@ export default function DeviceDetailScreen() {
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <Text style={styles.statLabel}>Current Draw</Text>
-            <Text style={[styles.statValue, { color: isOn ? Colors.primary : Colors.text }]}>
+            <Text style={[styles.statValue, { color: isOn ? colors.primary : colors.text }]}>
               {device.powerUsage || 0}W
             </Text>
           </View>
@@ -187,7 +190,7 @@ export default function DeviceDetailScreen() {
           <View style={styles.loadHeader}>
             <View style={styles.loadTitleRow}>
               <View style={styles.loadIconBox}>
-                <Ionicons name="flash-outline" size={20} color={Colors.primary} />
+                <Ionicons name="flash-outline" size={20} color={colors.primary} />
               </View>
               <View style={styles.loadTextContainer}>
                 <Text style={styles.loadCardTitle} numberOfLines={1}>Rated Power Specification</Text>
@@ -204,7 +207,7 @@ export default function DeviceDetailScreen() {
               }}
               activeOpacity={0.7}
             >
-              <Ionicons name={editingLoad ? "close-outline" : "create-outline"} size={16} color={Colors.primary} />
+              <Ionicons name={editingLoad ? "close-outline" : "create-outline"} size={16} color={colors.primary} />
               <Text style={styles.editLoadBtnText}>{editingLoad ? "Cancel" : "Edit Rating"}</Text>
             </TouchableOpacity>
           </View>
@@ -212,7 +215,7 @@ export default function DeviceDetailScreen() {
           {/* Current rating display */}
           <View style={styles.loadValueRow}>
             <Text style={styles.loadValueLabel}>Nameplate Rating:</Text>
-            <Text style={styles.loadValueText}>{currentRated} <Text style={{ fontSize: 13, color: Colors.textMuted }}>Watts</Text></Text>
+            <Text style={styles.loadValueText}>{currentRated} <Text style={{ fontSize: 13, color: colors.textMuted }}>Watts</Text></Text>
           </View>
 
           {/* Interactive Edit / Preset Section */}
@@ -244,7 +247,7 @@ export default function DeviceDetailScreen() {
                     setInputWatts(String(next));
                   }}
                 >
-                  <Ionicons name="remove" size={18} color={Colors.text} />
+                  <Ionicons name="remove" size={18} color={colors.text} />
                 </TouchableOpacity>
 
                 <TextInput
@@ -253,7 +256,7 @@ export default function DeviceDetailScreen() {
                   onChangeText={setInputWatts}
                   keyboardType="numeric"
                   placeholder="e.g. 45"
-                  placeholderTextColor={Colors.textMuted}
+                  placeholderTextColor={colors.inputPlaceholder}
                 />
 
                 <TouchableOpacity 
@@ -264,7 +267,7 @@ export default function DeviceDetailScreen() {
                     setInputWatts(String(next));
                   }}
                 >
-                  <Ionicons name="add" size={18} color={Colors.text} />
+                  <Ionicons name="add" size={18} color={colors.text} />
                 </TouchableOpacity>
 
                 <TouchableOpacity 
@@ -292,7 +295,7 @@ export default function DeviceDetailScreen() {
               }}
               activeOpacity={0.8}
             >
-              <Ionicons name={isCurtain ? 'scan-outline' : 'power'} size={18} color={isOn ? '#000' : Colors.text} />
+              <Ionicons name={isCurtain ? 'scan-outline' : 'power'} size={18} color={isOn ? (isDark ? '#000000' : '#FFFFFF') : colors.text} />
               <Text style={[styles.actionButtonText, isOn && styles.actionButtonTextActive]}>
                 {isCurtain ? 'Open Curtain' : 'Turn On'}
               </Text>
@@ -305,7 +308,7 @@ export default function DeviceDetailScreen() {
               }}
               activeOpacity={0.8}
             >
-              <Ionicons name={isCurtain ? 'close-circle-outline' : 'power-outline'} size={18} color={!isOn ? '#000' : Colors.text} />
+              <Ionicons name={isCurtain ? 'close-circle-outline' : 'power-outline'} size={18} color={!isOn ? (isDark ? '#000000' : '#FFFFFF') : colors.text} />
               <Text style={[styles.actionButtonText, !isOn && styles.actionButtonTextActive]}>
                 {isCurtain ? 'Close Curtain' : 'Turn Off'}
               </Text>
@@ -330,7 +333,7 @@ export default function DeviceDetailScreen() {
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Network Link</Text>
-            <Text style={[styles.infoValue, { color: esp32Connected ? Colors.success : Colors.warning }]}>
+            <Text style={[styles.infoValue, { color: esp32Connected ? colors.success : colors.warning }]}>
               {esp32Connected ? 'Online (Synced)' : 'Offline / Standby'}
             </Text>
           </View>
@@ -348,356 +351,358 @@ export default function DeviceDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  scrollContent: {
-    padding: Layout.spacing.md,
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 16,
-    paddingTop: 100,
-  },
-  emptyTitle: {
-    color: Colors.text,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  backBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: Layout.radius.md,
-    backgroundColor: Colors.primary,
-  },
-  backBtnText: {
-    color: '#000',
-    fontWeight: '700',
-  },
-  powerCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.lg,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-    marginBottom: 16,
-  },
-  powerCardActive: {
-    borderColor: Colors.primary,
-    backgroundColor: 'rgba(253, 168, 58, 0.05)',
-  },
-  powerCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  deviceIconLarge: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.surfaceTranslucent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  deviceIconLargeActive: {
-    backgroundColor: 'rgba(253, 168, 58, 0.15)',
-  },
-  powerInfo: {
-    flex: 1,
-  },
-  deviceName: {
-    color: Colors.text,
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  deviceLocation: {
-    color: Colors.textMuted,
-    fontSize: 13,
-  },
-  statusBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-    gap: 6,
-  },
-  dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  powerToggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: Colors.surfaceTranslucent,
-  },
-  powerLabel: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.md,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-    alignItems: 'center',
-  },
-  statLabel: {
-    color: Colors.textMuted,
-    fontSize: 11,
-  },
-  statValue: {
-    color: Colors.text,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  actionCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.lg,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-    marginBottom: 16,
-  },
-  actionTitle: {
-    color: Colors.text,
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  actionSubtitle: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    marginBottom: 14,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: Layout.radius.md,
-    backgroundColor: Colors.surfaceTranslucent,
-    gap: 8,
-  },
-  actionButtonActive: {
-    backgroundColor: Colors.primary,
-  },
-  actionButtonText: {
-    color: Colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  actionButtonTextActive: {
-    color: '#000',
-    fontWeight: '700',
-  },
-  infoCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.lg,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-  },
-  infoTitle: {
-    color: Colors.text,
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 14,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.surfaceTranslucent,
-  },
-  infoLabel: {
-    color: Colors.textMuted,
-    fontSize: 13,
-  },
-  infoValue: {
-    color: Colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  loadCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.lg,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(253, 168, 58, 0.25)',
-    marginBottom: 20,
-  },
-  loadHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.surfaceTranslucent,
-    gap: 10,
-  },
-  loadTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  loadTextContainer: {
-    flex: 1,
-    paddingRight: 6,
-  },
-  loadIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(253, 168, 58, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadCardTitle: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  loadCardSubtitle: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-    lineHeight: 15,
-  },
-  editLoadBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(253, 168, 58, 0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: Layout.radius.sm,
-    gap: 4,
-    flexShrink: 0,
-  },
-  editLoadBtnText: {
-    color: Colors.primary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  loadValueRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 12,
-  },
-  loadValueLabel: {
-    color: Colors.textMuted,
-    fontSize: 13,
-  },
-  loadValueText: {
-    color: Colors.text,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  loadEditContainer: {
-    marginTop: 14,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: Colors.surfaceTranslucent,
-  },
-  loadEditLabel: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  presetsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  presetChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: Colors.surfaceTranslucent,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  presetChipActive: {
-    backgroundColor: 'rgba(253, 168, 58, 0.2)',
-    borderColor: Colors.primary,
-  },
-  presetChipText: {
-    color: Colors.text,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  presetChipTextActive: {
-    color: Colors.primary,
-  },
-  customInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: Layout.radius.sm,
-    backgroundColor: Colors.surfaceTranslucent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-  },
-  loadInput: {
-    flex: 1,
-    height: 38,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    borderRadius: Layout.radius.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    color: Colors.text,
-    textAlign: 'center',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  saveWattsBtn: {
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 16,
-    height: 38,
-    borderRadius: Layout.radius.sm,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  saveWattsBtnText: {
-    color: '#000',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-});
+function getStyles(colors: any, isDark: boolean) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scrollContent: {
+      padding: Layout.spacing.md,
+    },
+    emptyState: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 16,
+      paddingTop: 100,
+    },
+    emptyTitle: {
+      color: colors.text,
+      fontSize: 18,
+      fontWeight: '600',
+    },
+    backBtn: {
+      paddingHorizontal: 20,
+      paddingVertical: 10,
+      borderRadius: Layout.radius.md,
+      backgroundColor: colors.primary,
+    },
+    backBtnText: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontWeight: '700',
+    },
+    powerCard: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 20,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      marginBottom: 16,
+    },
+    powerCardActive: {
+      borderColor: colors.primary,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.05)' : 'rgba(217, 119, 6, 0.05)',
+    },
+    powerCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 20,
+    },
+    deviceIconLarge: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 16,
+    },
+    deviceIconLargeActive: {
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.15)' : 'rgba(217, 119, 6, 0.12)',
+    },
+    powerInfo: {
+      flex: 1,
+    },
+    deviceName: {
+      color: colors.text,
+      fontSize: 20,
+      fontWeight: '700',
+      marginBottom: 4,
+    },
+    deviceLocation: {
+      color: colors.textMuted,
+      fontSize: 13,
+    },
+    statusBadgeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 6,
+      gap: 6,
+    },
+    dot: {
+      width: 7,
+      height: 7,
+      borderRadius: 3.5,
+    },
+    statusText: {
+      fontSize: 12,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
+    powerToggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingTop: 16,
+      borderTopWidth: 1,
+      borderTopColor: colors.surfaceBorder,
+    },
+    powerLabel: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '700',
+      letterSpacing: 1.5,
+    },
+    statsRow: {
+      flexDirection: 'row',
+      gap: 12,
+      marginBottom: 16,
+    },
+    statCard: {
+      flex: 1,
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.md,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      alignItems: 'center',
+    },
+    statLabel: {
+      color: colors.textMuted,
+      fontSize: 11,
+    },
+    statValue: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    actionCard: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      marginBottom: 16,
+    },
+    actionTitle: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '700',
+      marginBottom: 4,
+    },
+    actionSubtitle: {
+      color: colors.textMuted,
+      fontSize: 12,
+      marginBottom: 14,
+    },
+    buttonRow: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    actionButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 14,
+      borderRadius: Layout.radius.md,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : colors.cardSecondary,
+      gap: 8,
+    },
+    actionButtonActive: {
+      backgroundColor: colors.primary,
+    },
+    actionButtonText: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    actionButtonTextActive: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontWeight: '700',
+    },
+    infoCard: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    infoTitle: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '700',
+      marginBottom: 14,
+    },
+    infoRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.surfaceBorder,
+    },
+    infoLabel: {
+      color: colors.textMuted,
+      fontSize: 13,
+    },
+    infoValue: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    loadCard: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(253, 168, 58, 0.25)' : 'rgba(217, 119, 6, 0.25)',
+      marginBottom: 20,
+    },
+    loadHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingBottom: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.surfaceBorder,
+      gap: 10,
+    },
+    loadTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      flex: 1,
+    },
+    loadTextContainer: {
+      flex: 1,
+      paddingRight: 6,
+    },
+    loadIconBox: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.15)' : 'rgba(217, 119, 6, 0.12)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    loadCardTitle: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    loadCardSubtitle: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginTop: 2,
+      lineHeight: 15,
+    },
+    editLoadBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.12)' : 'rgba(217, 119, 6, 0.1)',
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: Layout.radius.sm,
+      gap: 4,
+      flexShrink: 0,
+    },
+    editLoadBtnText: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    loadValueRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingTop: 12,
+    },
+    loadValueLabel: {
+      color: colors.textMuted,
+      fontSize: 13,
+    },
+    loadValueText: {
+      color: colors.text,
+      fontSize: 17,
+      fontWeight: '700',
+    },
+    loadEditContainer: {
+      marginTop: 14,
+      paddingTop: 14,
+      borderTopWidth: 1,
+      borderTopColor: colors.surfaceBorder,
+    },
+    loadEditLabel: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
+      marginBottom: 8,
+    },
+    presetsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    presetChip: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 8,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    presetChipActive: {
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.2)' : 'rgba(217, 119, 6, 0.15)',
+      borderColor: colors.primary,
+    },
+    presetChipText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    presetChipTextActive: {
+      color: colors.primary,
+    },
+    customInputRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    stepBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: Layout.radius.sm,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : colors.cardSecondary,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    loadInput: {
+      flex: 1,
+      height: 38,
+      backgroundColor: colors.inputBackground,
+      borderRadius: Layout.radius.sm,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+      color: colors.text,
+      textAlign: 'center',
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    saveWattsBtn: {
+      backgroundColor: colors.primary,
+      paddingHorizontal: 16,
+      height: 38,
+      borderRadius: Layout.radius.sm,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    saveWattsBtnText: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontSize: 13,
+      fontWeight: '700',
+    },
+  });
+}

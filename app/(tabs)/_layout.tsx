@@ -1,15 +1,17 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { FloatingBottomNav } from '../../components/FloatingBottomNav';
-import { Colors } from '../../constants/colors';
+import { useApp } from '../../context/AppContext';
 
 export default function TabLayout() {
+  const { colors } = useApp();
+
   return (
     <Tabs
       tabBar={(props: any) => <FloatingBottomNav {...props} />}
       screenOptions={{
         headerShown: false,
-        sceneStyle: { backgroundColor: Colors.background },
+        sceneStyle: { backgroundColor: colors.background },
       }}
     >
       <Tabs.Screen

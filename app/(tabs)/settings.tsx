@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, ActivityIndicator, Alert as RNAlert } from 'react-native';
-import { Colors } from '../../constants/colors';
+import { ThemeColors } from '../../constants/colors';
 import { Layout } from '../../constants/layout';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useApp } from '../../context/AppContext';
@@ -10,7 +10,19 @@ import { Esp32LiveBar } from '../../components/Esp32LiveBar';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { user, campus, classrooms, esp32Connected, esp32Telemetry, updateEsp32WiFi, timetable } = useApp();
+  const {
+    user,
+    campus,
+    classrooms,
+    esp32Connected,
+    esp32Telemetry,
+    updateEsp32WiFi,
+    timetable,
+    colors,
+    isDark,
+    themeMode,
+    setThemeMode,
+  } = useApp();
 
   const [wifiModalVisible, setWifiModalVisible] = useState(false);
   const [inputSsid, setInputSsid] = useState('');
@@ -19,6 +31,7 @@ export default function SettingsScreen() {
   const [updatingWifi, setUpdatingWifi] = useState(false);
 
   const totalDevices = classrooms.reduce((sum, c) => sum + c.devices.length, 0);
+  const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
 
   const handleOpenWifiModal = () => {
     setInputSsid(esp32Telemetry?.ssid || '');
@@ -59,6 +72,75 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Appearance & Theme Selector */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Appearance & Theme</Text>
+          <View style={styles.themeCard}>
+            <View style={styles.themeInfoRow}>
+              <View style={styles.themeIconBox}>
+                <Ionicons name={isDark ? "moon" : "sunny"} size={22} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.themeTitle}>
+                  {isDark ? 'Dark Mode' : 'Light Mode'}
+                </Text>
+                <Text style={styles.themeSubtitle}>
+                  {isDark
+                    ? 'Deep obsidian black with high-contrast text'
+                    : 'Clean daylight aesthetic with WCAG AA/AAA compliant contrast'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Segmented Switch */}
+            <View style={styles.themeToggleContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.themeOptionBtn,
+                  !isDark && styles.themeOptionBtnActive,
+                ]}
+                activeOpacity={0.8}
+                onPress={() => setThemeMode('light')}
+              >
+                <Ionicons name="sunny" size={17} color={!isDark ? colors.primary : colors.textMuted} />
+                <Text
+                  style={[
+                    styles.themeOptionText,
+                    {
+                      color: !isDark ? colors.primary : colors.textSecondary,
+                      fontWeight: !isDark ? '700' : '500',
+                    },
+                  ]}
+                >
+                  Light Theme
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.themeOptionBtn,
+                  isDark && styles.themeOptionBtnActive,
+                ]}
+                activeOpacity={0.8}
+                onPress={() => setThemeMode('dark')}
+              >
+                <Ionicons name="moon" size={17} color={isDark ? colors.primary : colors.textMuted} />
+                <Text
+                  style={[
+                    styles.themeOptionText,
+                    {
+                      color: isDark ? colors.primary : colors.textSecondary,
+                      fontWeight: isDark ? '700' : '500',
+                    },
+                  ]}
+                >
+                  Dark Theme
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
         {/* ESP32 Live Controller Management */}
         <Esp32LiveBar />
 
@@ -71,7 +153,7 @@ export default function SettingsScreen() {
             onPress={() => router.push('/timetable')}
           >
             <View style={styles.timetableIconBox}>
-              <Ionicons name="notifications" size={24} color={Colors.primary} />
+              <Ionicons name="notifications" size={24} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
               <View style={styles.timetableCardHeader}>
@@ -86,7 +168,7 @@ export default function SettingsScreen() {
                 {timetable.periods.filter(p => p.enabled).length} periods • Tone: {timetable.defaultPattern.toUpperCase()}
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
+            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </TouchableOpacity>
         </View>
 
@@ -95,7 +177,7 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>System & Network</Text>
           <View style={styles.infoCard}>
             <View style={styles.infoRow}>
-              <Ionicons name="hardware-chip" size={18} color={Colors.primary} />
+              <Ionicons name="hardware-chip" size={18} color={colors.primary} />
               <Text style={styles.infoLabel}>Automation Hub</Text>
               <Text style={styles.infoValue}>Classroom Controller</Text>
             </View>
@@ -106,7 +188,7 @@ export default function SettingsScreen() {
               activeOpacity={0.7}
               onPress={handleOpenWifiModal}
             >
-              <Ionicons name="wifi" size={18} color={esp32Connected ? Colors.success : Colors.textMuted} />
+              <Ionicons name="wifi" size={18} color={esp32Connected ? colors.success : colors.textMuted} />
               <Text style={styles.infoLabel}>Wi-Fi Network</Text>
               <View style={styles.wifiValueContainer}>
                 <Text style={styles.infoValue}>
@@ -119,17 +201,17 @@ export default function SettingsScreen() {
             </TouchableOpacity>
 
             <View style={styles.infoRow}>
-              <Ionicons name="globe-outline" size={18} color={Colors.primary} />
+              <Ionicons name="globe-outline" size={18} color={colors.primary} />
               <Text style={styles.infoLabel}>mDNS URL</Text>
               <Text style={styles.infoValue}>esp32-classroom.local</Text>
             </View>
             <View style={styles.infoRow}>
-              <Ionicons name="git-branch" size={18} color={Colors.primary} />
+              <Ionicons name="git-branch" size={18} color={colors.primary} />
               <Text style={styles.infoLabel}>Firmware</Text>
               <Text style={styles.infoValue}>v{esp32Telemetry?.firmware || '2.4.1'}</Text>
             </View>
             <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
-              <Ionicons name="layers" size={18} color={Colors.primary} />
+              <Ionicons name="layers" size={18} color={colors.primary} />
               <Text style={styles.infoLabel}>Controlled Zones</Text>
               <Text style={styles.infoValue}>2 Rooms + Corridors ({totalDevices} dev)</Text>
             </View>
@@ -141,12 +223,12 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>Campus Info</Text>
           <View style={styles.infoCard}>
             <View style={styles.infoRow}>
-              <Ionicons name="school" size={18} color={Colors.primary} />
+              <Ionicons name="school" size={18} color={colors.primary} />
               <Text style={styles.infoLabel}>Institution</Text>
               <Text style={styles.infoValue}>{campus.name}</Text>
             </View>
             <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
-              <Ionicons name="business" size={18} color={Colors.primary} />
+              <Ionicons name="business" size={18} color={colors.primary} />
               <Text style={styles.infoLabel}>Department</Text>
               <Text style={styles.infoValue}>{campus.department}</Text>
             </View>
@@ -167,7 +249,7 @@ export default function SettingsScreen() {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <View style={styles.modalIconBox}>
-                <Ionicons name="wifi" size={24} color={Colors.primary} />
+                <Ionicons name="wifi" size={24} color={colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.modalTitle}>Configure Controller Wi-Fi</Text>
@@ -178,11 +260,11 @@ export default function SettingsScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Wi-Fi Network Name (SSID)</Text>
               <View style={styles.inputWrapper}>
-                <Ionicons name="wifi-outline" size={18} color={Colors.textMuted} style={styles.inputIcon} />
+                <Ionicons name="wifi-outline" size={18} color={colors.textMuted} style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
                   placeholder="e.g. Campus_WiFi or Hotspot"
-                  placeholderTextColor={Colors.textMuted}
+                  placeholderTextColor={colors.textMuted}
                   value={inputSsid}
                   onChangeText={setInputSsid}
                   autoCapitalize="none"
@@ -194,11 +276,11 @@ export default function SettingsScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Wi-Fi Password</Text>
               <View style={styles.inputWrapper}>
-                <Ionicons name="lock-closed-outline" size={18} color={Colors.textMuted} style={styles.inputIcon} />
+                <Ionicons name="lock-closed-outline" size={18} color={colors.textMuted} style={styles.inputIcon} />
                 <TextInput
                   style={[styles.textInput, { paddingRight: 40 }]}
                   placeholder="Leave empty if open network"
-                  placeholderTextColor={Colors.textMuted}
+                  placeholderTextColor={colors.textMuted}
                   value={inputPassword}
                   onChangeText={setInputPassword}
                   secureTextEntry={!showPassword}
@@ -209,13 +291,13 @@ export default function SettingsScreen() {
                   style={styles.eyeBtn}
                   onPress={() => setShowPassword(!showPassword)}
                 >
-                  <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={18} color={Colors.textMuted} />
+                  <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={18} color={colors.textMuted} />
                 </TouchableOpacity>
               </View>
             </View>
 
             <View style={styles.noteBox}>
-              <Ionicons name="information-circle-outline" size={16} color={Colors.primary} />
+              <Ionicons name="information-circle-outline" size={16} color={colors.primary} />
               <Text style={styles.noteText}>
                 The controller will save these credentials to permanent NVS flash memory and reboot into the new network.
               </Text>
@@ -236,10 +318,10 @@ export default function SettingsScreen() {
                 disabled={updatingWifi}
               >
                 {updatingWifi ? (
-                  <ActivityIndicator size="small" color="#000" />
+                  <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
                   <>
-                    <Ionicons name="checkmark-circle-outline" size={18} color="#000" />
+                    <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
                     <Text style={styles.saveBtnText}>Update & Reboot</Text>
                   </>
                 )}
@@ -252,285 +334,349 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  scrollContent: {
-    padding: Layout.spacing.md,
-  },
-  profileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.lg,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-    marginBottom: 20,
-    gap: 16,
-  },
-  avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    color: '#000',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    color: Colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  profileRole: {
-    color: Colors.primary,
-    fontSize: 13,
-    marginTop: 2,
-  },
-  profileEmail: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  section: {
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    color: Colors.text,
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 10,
-  },
-  infoCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-    overflow: 'hidden',
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.surfaceTranslucent,
-    gap: 12,
-  },
-  infoLabel: {
-    color: Colors.textMuted,
-    fontSize: 13,
-    flex: 1,
-  },
-  infoValue: {
-    color: Colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  wifiValueContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  configureBadge: {
-    backgroundColor: 'rgba(253, 168, 58, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(253, 168, 58, 0.3)',
-  },
-  configureBadgeText: {
-    color: Colors.primary,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.xl,
-    padding: 24,
-    width: '100%',
-    maxWidth: 400,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    marginBottom: 20,
-  },
-  modalIconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(253, 168, 58, 0.12)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalTitle: {
-    color: Colors.text,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  modalSubtitle: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    color: Colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1E1E1E',
-    borderRadius: Layout.radius.md,
-    borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
-    paddingHorizontal: 12,
-  },
-  inputIcon: {
-    marginRight: 8,
-  },
-  textInput: {
-    flex: 1,
-    color: Colors.text,
-    fontSize: 14,
-    paddingVertical: 12,
-  },
-  eyeBtn: {
-    padding: 6,
-  },
-  noteBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: 'rgba(253, 168, 58, 0.08)',
-    borderRadius: Layout.radius.md,
-    padding: 12,
-    gap: 10,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(253, 168, 58, 0.2)',
-  },
-  noteText: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    lineHeight: 16,
-    flex: 1,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  cancelBtn: {
-    flex: 1,
-    paddingVertical: 13,
-    borderRadius: Layout.radius.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cancelBtnText: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  saveBtn: {
-    flex: 2,
-    paddingVertical: 13,
-    borderRadius: Layout.radius.md,
-    backgroundColor: Colors.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  saveBtnText: {
-    color: '#000',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  timetableCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.card,
-    borderRadius: Layout.radius.lg,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(253, 168, 58, 0.25)',
-    gap: 14,
-  },
-  timetableIconBox: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: 'rgba(253, 168, 58, 0.12)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(253, 168, 58, 0.2)',
-  },
-  timetableCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  timetableCardTitle: {
-    color: Colors.text,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  timetableCardSubtitle: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    marginTop: 3,
-  },
-  badge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-    borderWidth: 1,
-  },
-  badgeActive: {
-    backgroundColor: 'rgba(46, 213, 115, 0.15)',
-    borderColor: 'rgba(46, 213, 115, 0.3)',
-  },
-  badgeDisabled: {
-    backgroundColor: 'rgba(150, 150, 150, 0.15)',
-    borderColor: 'rgba(150, 150, 150, 0.3)',
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  badgeTextActive: {
-    color: Colors.success,
-  },
-  badgeTextDisabled: {
-    color: Colors.textMuted,
-  },
-});
+const getStyles = (colors: ThemeColors, isDark: boolean) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scrollContent: {
+      padding: Layout.spacing.md,
+    },
+    profileCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      marginBottom: 20,
+      gap: 16,
+    },
+    avatar: {
+      width: 50,
+      height: 50,
+      borderRadius: 25,
+      backgroundColor: colors.primary,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    avatarText: {
+      color: '#FFFFFF',
+      fontSize: 18,
+      fontWeight: '700',
+    },
+    profileInfo: {
+      flex: 1,
+    },
+    profileName: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    profileRole: {
+      color: colors.primary,
+      fontSize: 13,
+      marginTop: 2,
+      fontWeight: '600',
+    },
+    profileEmail: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    section: {
+      marginBottom: 20,
+    },
+    sectionTitle: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '700',
+      marginBottom: 10,
+    },
+    themeCard: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    themeInfoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      marginBottom: 14,
+    },
+    themeIconBox: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.primarySubtle,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    themeTitle: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    themeSubtitle: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      marginTop: 2,
+      lineHeight: 16,
+    },
+    themeToggleContainer: {
+      flexDirection: 'row',
+      backgroundColor: colors.cardSecondary,
+      borderRadius: Layout.radius.md,
+      padding: 4,
+      gap: 6,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    themeOptionBtn: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 10,
+      borderRadius: Layout.radius.sm,
+      gap: 8,
+    },
+    themeOptionBtnActive: {
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: isDark ? 0.3 : 0.08,
+      shadowRadius: 3,
+      elevation: 2,
+    },
+    themeOptionText: {
+      fontSize: 13,
+    },
+    infoCard: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      overflow: 'hidden',
+    },
+    infoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.surfaceBorder,
+      gap: 12,
+    },
+    infoLabel: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      flex: 1,
+    },
+    infoValue: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    wifiValueContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    configureBadge: {
+      backgroundColor: colors.primarySubtle,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: colors.primarySubtle,
+    },
+    configureBadgeText: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    timetableCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      gap: 14,
+    },
+    timetableIconBox: {
+      width: 46,
+      height: 46,
+      borderRadius: 23,
+      backgroundColor: colors.primarySubtle,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.primarySubtle,
+    },
+    timetableCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    timetableCardTitle: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    timetableCardSubtitle: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      marginTop: 3,
+    },
+    badge: {
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+      borderWidth: 1,
+    },
+    badgeActive: {
+      backgroundColor: colors.successSubtle,
+      borderColor: colors.successSubtle,
+    },
+    badgeDisabled: {
+      backgroundColor: isDark ? 'rgba(150, 150, 150, 0.15)' : 'rgba(0, 0, 0, 0.06)',
+      borderColor: isDark ? 'rgba(150, 150, 150, 0.3)' : 'rgba(0, 0, 0, 0.1)',
+    },
+    badgeText: {
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    badgeTextActive: {
+      color: colors.success,
+    },
+    badgeTextDisabled: {
+      color: colors.textMuted,
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: colors.modalOverlay,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 20,
+    },
+    modalContent: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.xl,
+      padding: 24,
+      width: '100%',
+      maxWidth: 400,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      marginBottom: 20,
+    },
+    modalIconBox: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.primarySubtle,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    modalTitle: {
+      color: colors.text,
+      fontSize: 17,
+      fontWeight: '700',
+    },
+    modalSubtitle: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    inputGroup: {
+      marginBottom: 16,
+    },
+    inputLabel: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+      marginBottom: 6,
+    },
+    inputWrapper: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.inputBackground,
+      borderRadius: Layout.radius.md,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+      paddingHorizontal: 12,
+    },
+    inputIcon: {
+      marginRight: 8,
+    },
+    textInput: {
+      flex: 1,
+      color: colors.text,
+      fontSize: 14,
+      paddingVertical: 12,
+    },
+    eyeBtn: {
+      padding: 6,
+    },
+    noteBox: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      backgroundColor: colors.primarySubtle,
+      borderRadius: Layout.radius.md,
+      padding: 12,
+      gap: 10,
+      marginBottom: 20,
+      borderWidth: 1,
+      borderColor: colors.primarySubtle,
+    },
+    noteText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 16,
+      flex: 1,
+    },
+    modalActions: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    cancelBtn: {
+      flex: 1,
+      paddingVertical: 13,
+      borderRadius: Layout.radius.md,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cancelBtnText: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    saveBtn: {
+      flex: 2,
+      paddingVertical: 13,
+      borderRadius: Layout.radius.md,
+      backgroundColor: colors.primary,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+    },
+    saveBtnText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '700',
+    },
+  });

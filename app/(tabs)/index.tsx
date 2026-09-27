@@ -8,14 +8,17 @@ import { QuickControls } from '../../components/QuickControls';
 import { Esp32LiveBar } from '../../components/Esp32LiveBar';
 import { ClassroomCard } from '../../components/ClassroomCard';
 import { NoticeBoardCard } from '../../components/NoticeBoardCard';
-import { useApp } from '../../context/AppContext';
+import { useApp, useTheme } from '../../context/AppContext';
 import { useRouter } from 'expo-router';
 
 import { Ionicons } from '@expo/vector-icons';
 
 export default function HomeScreen() {
   const { classrooms, timetable } = useApp();
+  const { colors, isDark } = useTheme();
   const router = useRouter();
+
+  const styles = React.useMemo(() => getStyles(colors, isDark), [colors, isDark]);
 
   // Determine current active period
   const now = new Date();
@@ -49,8 +52,8 @@ export default function HomeScreen() {
             onPress={() => router.push('/timetable')}
           >
             <View style={styles.periodBannerLeft}>
-              <View style={[styles.periodDot, { backgroundColor: activePeriod ? Colors.success : Colors.primary }]} />
-              <Ionicons name={activePeriod ? "notifications" : "calendar-outline"} size={16} color={activePeriod ? Colors.primary : Colors.textMuted} />
+              <View style={[styles.periodDot, { backgroundColor: activePeriod ? colors.success : colors.primary }]} />
+              <Ionicons name={activePeriod ? "notifications" : "calendar-outline"} size={16} color={activePeriod ? colors.primary : colors.textMuted} />
               <Text style={styles.periodBannerText} numberOfLines={1}>
                 {activePeriod 
                   ? `Active: ${activePeriod.name} (${activePeriod.startTime} - ${activePeriod.endTime})` 
@@ -87,73 +90,75 @@ export default function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  scrollContent: {
-    paddingTop: 16,
-  },
-  noticeSection: {
-    paddingHorizontal: Layout.spacing.md,
-  },
-  section: {
-    paddingHorizontal: Layout.spacing.md,
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    color: Colors.text,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  seeAll: {
-    color: Colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  periodBannerContainer: {
-    paddingHorizontal: Layout.spacing.md,
-    marginBottom: 12,
-  },
-  periodBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(253, 168, 58, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(253, 168, 58, 0.25)',
-    borderRadius: Layout.radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
-  },
-  periodBannerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    gap: 8,
-  },
-  periodDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  periodBannerText: {
-    color: Colors.text,
-    fontSize: 12,
-    flex: 1,
-    fontWeight: '500',
-  },
-  periodBannerAction: {
-    color: Colors.primary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-});
+function getStyles(colors: any, isDark: boolean) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scrollContent: {
+      paddingTop: 16,
+    },
+    noticeSection: {
+      paddingHorizontal: Layout.spacing.md,
+    },
+    section: {
+      paddingHorizontal: Layout.spacing.md,
+      marginBottom: 24,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    sectionTitle: {
+      color: colors.text,
+      fontSize: 18,
+      fontWeight: '700',
+    },
+    seeAll: {
+      color: colors.primary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    periodBannerContainer: {
+      paddingHorizontal: Layout.spacing.md,
+      marginBottom: 12,
+    },
+    periodBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.08)' : 'rgba(217, 119, 6, 0.08)',
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(253, 168, 58, 0.25)' : 'rgba(217, 119, 6, 0.25)',
+      borderRadius: Layout.radius.md,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 8,
+    },
+    periodBannerLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+      gap: 8,
+    },
+    periodDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+    },
+    periodBannerText: {
+      color: colors.text,
+      fontSize: 12,
+      flex: 1,
+      fontWeight: '500',
+    },
+    periodBannerAction: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+  });
+}

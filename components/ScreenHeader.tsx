@@ -6,6 +6,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useApp } from '../context/AppContext';
+
 interface ScreenHeaderProps {
   title: string;
   showBack?: boolean;
@@ -13,21 +15,22 @@ interface ScreenHeaderProps {
 }
 
 export function ScreenHeader({ title, showBack = false, rightElement }: ScreenHeaderProps) {
+  const { colors } = useApp();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.container, { paddingTop: Math.max(insets.top, 16) }]}>
+    <View style={[styles.container, { paddingTop: Math.max(insets.top, 16), backgroundColor: colors.background }]}>
       <View style={styles.left}>
         {showBack && (
           <TouchableOpacity 
-            style={styles.backButton}
+            style={[styles.backButton, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}
             onPress={() => router.back()}
           >
-            <Ionicons name="chevron-back" size={24} color={Colors.text} />
+            <Ionicons name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
         )}
-        <Text style={styles.title}>{title}</Text>
+        <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
       </View>
       <View style={styles.right}>
         {rightElement}
@@ -43,7 +46,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: Layout.spacing.md,
     paddingBottom: 16,
-    backgroundColor: Colors.background,
   },
   left: {
     flexDirection: 'row',
@@ -54,14 +56,11 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: Colors.card,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Colors.surfaceTranslucent,
   },
   title: {
-    color: Colors.text,
     fontSize: 24,
     fontWeight: '700',
   },

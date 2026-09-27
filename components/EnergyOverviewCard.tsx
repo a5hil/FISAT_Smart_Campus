@@ -7,7 +7,7 @@ import { useApp } from '../context/AppContext';
 import { useRouter } from 'expo-router';
 
 export function EnergyOverviewCard() {
-  const { classrooms } = useApp();
+  const { classrooms, colors, isDark } = useApp();
   const router = useRouter();
 
   // Calculate totals
@@ -21,51 +21,53 @@ export function EnergyOverviewCard() {
     activeDevices += cls.devices.filter(d => d.status === 'on').length;
   });
 
+  const mainCardTextColor = isDark ? '#000000' : '#FFFFFF';
+
   return (
     <View style={styles.container}>
       <TouchableOpacity 
-        style={styles.mainCard} 
+        style={[styles.mainCard, { backgroundColor: colors.primary }]} 
         activeOpacity={0.8}
         onPress={() => router.push('/energy')}
       >
         <View style={styles.cardHeader}>
-          <View style={styles.iconContainer}>
-            <Ionicons name="flash" size={20} color="#000" />
+          <View style={[styles.iconContainer, { backgroundColor: isDark ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.2)' }]}>
+            <Ionicons name="flash" size={20} color={mainCardTextColor} />
           </View>
-          <Text style={styles.cardTitle}>Today's Energy</Text>
+          <Text style={[styles.cardTitle, { color: mainCardTextColor }]}>Today's Energy</Text>
         </View>
         <View style={styles.cardBody}>
-          <Text style={styles.energyValue}>
+          <Text style={[styles.energyValue, { color: mainCardTextColor }]}>
             {totalEnergy < 1 ? totalEnergy.toFixed(3) : totalEnergy.toFixed(2)}
           </Text>
-          <Text style={styles.energyUnit}>kWh</Text>
+          <Text style={[styles.energyUnit, { color: mainCardTextColor }]}>kWh</Text>
         </View>
         <View style={styles.cardFooter}>
-          <Ionicons name="hardware-chip-outline" size={15} color="rgba(0,0,0,0.7)" />
-          <Text style={styles.footerText}>Live hardware telemetry</Text>
+          <Ionicons name="hardware-chip-outline" size={15} color={mainCardTextColor} />
+          <Text style={[styles.footerText, { color: mainCardTextColor }]}>Live hardware telemetry</Text>
         </View>
       </TouchableOpacity>
 
       <View style={styles.sideCards}>
-        <View style={styles.sideCard}>
-          <View style={[styles.iconContainerSide, { backgroundColor: 'rgba(253, 168, 58, 0.15)' }]}>
-            <Ionicons name="power" size={16} color={Colors.primary} />
+        <View style={[styles.sideCard, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}>
+          <View style={[styles.iconContainerSide, { backgroundColor: colors.primarySubtle }]}>
+            <Ionicons name="power" size={16} color={colors.primary} />
           </View>
           <View style={styles.sideCardTextContainer}>
-            <Text style={styles.sideCardLabel}>Current Load</Text>
-            <Text style={styles.sideCardValue}>
+            <Text style={[styles.sideCardLabel, { color: colors.textSecondary }]}>Current Load</Text>
+            <Text style={[styles.sideCardValue, { color: colors.text }]}>
               {totalLoad < 1000 ? `${totalLoad.toFixed(0)} W` : `${(totalLoad / 1000).toFixed(2)} kW`}
             </Text>
           </View>
         </View>
 
-        <View style={styles.sideCard}>
-          <View style={[styles.iconContainerSide, { backgroundColor: 'rgba(76, 175, 80, 0.15)' }]}>
-            <Ionicons name="radio-button-on" size={16} color={Colors.success} />
+        <View style={[styles.sideCard, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}>
+          <View style={[styles.iconContainerSide, { backgroundColor: colors.successSubtle }]}>
+            <Ionicons name="radio-button-on" size={16} color={colors.success} />
           </View>
           <View style={styles.sideCardTextContainer}>
-            <Text style={styles.sideCardLabel}>Active Devices</Text>
-            <Text style={styles.sideCardValue}>{activeDevices}</Text>
+            <Text style={[styles.sideCardLabel, { color: colors.textSecondary }]}>Active Devices</Text>
+            <Text style={[styles.sideCardValue, { color: colors.text }]}>{activeDevices}</Text>
           </View>
         </View>
       </View>

@@ -12,7 +12,7 @@ import { Colors } from '../../constants/colors';
 import { Layout } from '../../constants/layout';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { NoticeModal } from '../../components/NoticeModal';
-import { useApp } from '../../context/AppContext';
+import { useApp, useTheme } from '../../context/AppContext';
 import { NoticeItem } from '../../types';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -20,9 +20,12 @@ type ScopeFilter = 'All' | 'Broadcast' | 'A101' | 'A102';
 
 export default function AnnouncementsScreen() {
   const { notices, deleteNotice, esp32Connected, esp32Ip } = useApp();
+  const { colors, isDark } = useTheme();
   const [activeFilter, setActiveFilter] = useState<ScopeFilter>('All');
   const [modalVisible, setModalVisible] = useState(false);
   const [defaultTarget, setDefaultTarget] = useState<'all' | 'cls-a101' | 'cls-a102'>('all');
+
+  const styles = React.useMemo(() => getStyles(colors, isDark), [colors, isDark]);
 
   const filteredNotices = notices.filter((n) => {
     if (activeFilter === 'All') return true;
@@ -84,7 +87,7 @@ export default function AnnouncementsScreen() {
             onPress={() => openNewModal('all')}
             activeOpacity={0.8}
           >
-            <Ionicons name="add" size={20} color="#000000" />
+            <Ionicons name="add" size={20} color={isDark ? '#000000' : '#FFFFFF'} />
             <Text style={styles.headerAddText}>New Notice</Text>
           </TouchableOpacity>
         }
@@ -94,7 +97,7 @@ export default function AnnouncementsScreen() {
         {/* Hardware Status Banner */}
         <View style={styles.hardwareBanner}>
           <View style={styles.hardwareLeft}>
-            <View style={[styles.hardwareDot, { backgroundColor: esp32Connected ? Colors.success : Colors.textMuted }]} />
+            <View style={[styles.hardwareDot, { backgroundColor: esp32Connected ? colors.success : colors.textMuted }]} />
             <View>
               <Text style={styles.hardwareTitle}>
                 Classroom Notice Board ({esp32Connected ? 'Active' : 'Standby'})
@@ -104,7 +107,7 @@ export default function AnnouncementsScreen() {
               </Text>
             </View>
           </View>
-          <Ionicons name="easel-outline" size={22} color={Colors.primary} />
+          <Ionicons name="easel-outline" size={22} color={colors.primary} />
         </View>
 
         {/* Quick Action Cards */}
@@ -114,8 +117,8 @@ export default function AnnouncementsScreen() {
             onPress={() => openNewModal('all')}
             activeOpacity={0.8}
           >
-            <View style={[styles.actionIconBox, { backgroundColor: 'rgba(253, 168, 58, 0.15)' }]}>
-              <Ionicons name="megaphone" size={18} color={Colors.primary} />
+            <View style={[styles.actionIconBox, { backgroundColor: isDark ? 'rgba(253, 168, 58, 0.15)' : 'rgba(217, 119, 6, 0.12)' }]}>
+              <Ionicons name="megaphone" size={18} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.actionTitle}>Broadcast Notice</Text>
@@ -128,8 +131,8 @@ export default function AnnouncementsScreen() {
             onPress={() => openNewModal('cls-a101')}
             activeOpacity={0.8}
           >
-            <View style={[styles.actionIconBox, { backgroundColor: 'rgba(73, 199, 121, 0.15)' }]}>
-              <Ionicons name="business" size={18} color={Colors.success} />
+            <View style={[styles.actionIconBox, { backgroundColor: isDark ? 'rgba(73, 199, 121, 0.15)' : 'rgba(21, 128, 61, 0.12)' }]}>
+              <Ionicons name="business" size={18} color={colors.success} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.actionTitle}>Room Notice</Text>
@@ -175,12 +178,12 @@ export default function AnnouncementsScreen() {
                     <Ionicons
                       name={item.classroomId === 'all' ? 'megaphone' : 'business'}
                       size={12}
-                      color={item.classroomId === 'all' ? Colors.primary : Colors.textSecondary}
+                      color={item.classroomId === 'all' ? colors.primary : colors.textSecondary}
                     />
                     <Text
                       style={[
                         styles.scopeBadgeText,
-                        item.classroomId === 'all' && { color: Colors.primary },
+                        item.classroomId === 'all' && { color: colors.primary },
                       ]}
                     >
                       {item.classroomId === 'all' ? 'Broadcast (All Classrooms)' : (item.classroomName || item.classroomId)}
@@ -189,7 +192,7 @@ export default function AnnouncementsScreen() {
 
                   <View style={styles.metaRight}>
                     <View style={styles.durationBadge}>
-                      <Ionicons name="time-outline" size={11} color={Colors.textMuted} />
+                      <Ionicons name="time-outline" size={11} color={colors.textMuted} />
                       <Text style={styles.durationText}>{formatExpiry(item)}</Text>
                     </View>
                     <TouchableOpacity
@@ -197,7 +200,7 @@ export default function AnnouncementsScreen() {
                       onPress={() => handleDelete(item.id, item.title)}
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
-                      <Ionicons name="trash-outline" size={16} color={Colors.critical} />
+                      <Ionicons name="trash-outline" size={16} color={colors.critical} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -222,7 +225,7 @@ export default function AnnouncementsScreen() {
             ))
           ) : (
             <View style={styles.emptyCard}>
-              <Ionicons name="notifications-off-outline" size={36} color={Colors.textMuted} />
+              <Ionicons name="notifications-off-outline" size={36} color={colors.textMuted} />
               <Text style={styles.emptyTitle}>No Announcements in this Scope</Text>
               <Text style={styles.emptyDesc}>
                 Tap the "+ New Notice" button to display an announcement on the classroom digital board.
@@ -232,7 +235,7 @@ export default function AnnouncementsScreen() {
                 onPress={() => openNewModal('all')}
                 activeOpacity={0.8}
               >
-                <Ionicons name="add" size={16} color="#000000" />
+                <Ionicons name="add" size={16} color={isDark ? '#000000' : '#FFFFFF'} />
                 <Text style={styles.emptyAddBtnText}>Post Announcement</Text>
               </TouchableOpacity>
             </View>
@@ -253,263 +256,265 @@ export default function AnnouncementsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  headerAddBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 10,
-  },
-  headerAddText: {
-    color: '#000000',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  scrollContent: {
-    paddingHorizontal: Layout.spacing.md,
-    paddingTop: 16,
-  },
-  hardwareBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#181818',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    marginBottom: 14,
-  },
-  hardwareLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  hardwareDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  hardwareTitle: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  hardwareSub: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16,
-  },
-  actionCard: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#161616',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  actionIconBox: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionTitle: {
-    color: Colors.text,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  actionDesc: {
-    color: Colors.textMuted,
-    fontSize: 10,
-    marginTop: 1,
-  },
-  filterRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
-  filterPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  filterPillActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  filterPillText: {
-    color: Colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  filterPillTextActive: {
-    color: '#000000',
-    fontWeight: '700',
-  },
-  listSection: {
-    marginBottom: 20,
-  },
-  listHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  listTitle: {
-    color: Colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  listSubtitle: {
-    color: Colors.textMuted,
-    fontSize: 11,
-  },
-  noticeCard: {
-    backgroundColor: '#161616',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  noticeTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  scopeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  scopeBadgeText: {
-    color: Colors.textSecondary,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  metaRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  durationBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  durationText: {
-    color: Colors.textMuted,
-    fontSize: 11,
-  },
-  deleteBtn: {
-    padding: 2,
-  },
-  noticeTitle: {
-    color: Colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 6,
-    lineHeight: 22,
-  },
-  noticeMessage: {
-    color: '#D4D4D4',
-    fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 14,
-  },
-  noticeFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.06)',
-    paddingTop: 10,
-  },
-  timestampText: {
-    color: Colors.textMuted,
-    fontSize: 11,
-  },
-  oledSyncBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  syncDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: Colors.success,
-  },
-  syncText: {
-    color: Colors.success,
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  emptyCard: {
-    backgroundColor: '#141414',
-    borderRadius: 14,
-    padding: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'dashed rgba(255, 255, 255, 0.08)',
-    gap: 8,
-  },
-  emptyTitle: {
-    color: Colors.textSecondary,
-    fontSize: 14,
-    fontWeight: '600',
-    marginTop: 6,
-  },
-  emptyDesc: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 17,
-  },
-  emptyAddBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 10,
-    marginTop: 10,
-  },
-  emptyAddBtnText: {
-    color: '#000000',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-});
+function getStyles(colors: any, isDark: boolean) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    headerAddBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: colors.primary,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 10,
+    },
+    headerAddText: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    scrollContent: {
+      paddingHorizontal: Layout.spacing.md,
+      paddingTop: 16,
+    },
+    hardwareBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      marginBottom: 14,
+    },
+    hardwareLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      flex: 1,
+    },
+    hardwareDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+    },
+    hardwareTitle: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    hardwareSub: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    actionsRow: {
+      flexDirection: 'row',
+      gap: 10,
+      marginBottom: 16,
+    },
+    actionCard: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    actionIconBox: {
+      width: 34,
+      height: 34,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    actionTitle: {
+      color: colors.text,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    actionDesc: {
+      color: colors.textMuted,
+      fontSize: 10,
+      marginTop: 1,
+    },
+    filterRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 16,
+    },
+    filterPill: {
+      paddingHorizontal: 14,
+      paddingVertical: 7,
+      borderRadius: 20,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    filterPillActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    filterPillText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    filterPillTextActive: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontWeight: '700',
+    },
+    listSection: {
+      marginBottom: 20,
+    },
+    listHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    listTitle: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    listSubtitle: {
+      color: colors.textMuted,
+      fontSize: 11,
+    },
+    noticeCard: {
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      padding: 16,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    noticeTopRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    scopeBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : colors.cardSecondary,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 8,
+    },
+    scopeBadgeText: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    metaRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    durationBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 8,
+    },
+    durationText: {
+      color: colors.textMuted,
+      fontSize: 11,
+    },
+    deleteBtn: {
+      padding: 2,
+    },
+    noticeTitle: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '700',
+      marginBottom: 6,
+      lineHeight: 22,
+    },
+    noticeMessage: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      lineHeight: 19,
+      marginBottom: 14,
+    },
+    noticeFooter: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      borderTopWidth: 1,
+      borderTopColor: colors.surfaceBorder,
+      paddingTop: 10,
+    },
+    timestampText: {
+      color: colors.textMuted,
+      fontSize: 11,
+    },
+    oledSyncBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    syncDot: {
+      width: 5,
+      height: 5,
+      borderRadius: 3,
+      backgroundColor: colors.success,
+    },
+    syncText: {
+      color: colors.success,
+      fontSize: 10,
+      fontWeight: '600',
+    },
+    emptyCard: {
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      padding: 28,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      gap: 8,
+    },
+    emptyTitle: {
+      color: colors.textSecondary,
+      fontSize: 14,
+      fontWeight: '600',
+      marginTop: 6,
+    },
+    emptyDesc: {
+      color: colors.textMuted,
+      fontSize: 12,
+      textAlign: 'center',
+      lineHeight: 17,
+    },
+    emptyAddBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: colors.primary,
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+      borderRadius: 10,
+      marginTop: 10,
+    },
+    emptyAddBtnText: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontSize: 12,
+      fontWeight: '700',
+    },
+  });
+}
