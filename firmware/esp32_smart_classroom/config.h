@@ -32,7 +32,7 @@ const int WIFI_CONNECT_TIMEOUT_SEC = 15;  // Seconds before starting setup hotsp
 // Network Identifiers
 const char *const HOSTNAME =
     "esp32-classroom"; // Accessible at http://esp32-classroom.local
-const char *const FIRMWARE_VERSION = "2.4.1";
+const char *const FIRMWARE_VERSION = "2.5.0";
 const int WEB_SERVER_PORT = 80;
 
 // ==========================================
@@ -90,6 +90,28 @@ const unsigned long SUPABASE_TELEMETRY_INTERVAL_MS =
 #define NTP_SERVER_3 "asia.pool.ntp.org"
 #define GMT_OFFSET_SEC 19800    // UTC+5:30 (Indian Standard Time: 5.5h * 3600 = 19800s)
 #define DAYLIGHT_OFFSET_SEC 0   // No daylight saving time in IST
+
+// --- 3V Audio Alert Buzzer ---
+// Configurable GPIO pin for audio alerts (e.g. short beep on new notice)
+// GPIO 23 is general-purpose, boot-safe, and has 3.3V drive capability
+#define BUZZER_PIN 23
+
+// Buzzer Mode:
+// Set to true if using an Active Buzzer (built-in oscillator, driven by DC HIGH/LOW)
+// Set to false if using a Passive Buzzer (driven by frequency tone PWM)
+#define BUZZER_IS_ACTIVE true
+
+// Logic level for Active Buzzer:
+// Most 3V active buzzers are Active-HIGH (HIGH = sound, LOW = silence)
+#define BUZZER_ACTIVE_HIGH true
+
+// Default frequency for passive buzzer (Hz)
+#define BUZZER_TONE_FREQ 2700
+
+// Notification chime parameters
+#define BUZZER_NOTICE_BEEPS 2       // Number of short beeps on new notice
+#define BUZZER_BEEP_DURATION_MS 90  // Milliseconds per beep
+#define BUZZER_BEEP_PAUSE_MS 60     // Pause between multiple beeps
 
 // --- Shared Environment Sensors ---
 #define DHTPIN 4      // DHT11 or DHT22 Temperature & Humidity Sensor

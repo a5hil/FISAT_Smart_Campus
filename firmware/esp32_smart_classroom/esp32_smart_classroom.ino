@@ -80,6 +80,70 @@ Servo curtain2;
 Preferences preferences;
 
 // ==========================================
+// --- 3V BUZZER AUDIO ALERT STATE ---
+// ==========================================
+volatile int buzzerBeepsRemaining = 0;
+volatile int buzzerCurrentDurationMs = BUZZER_BEEP_DURATION_MS;
+volatile int buzzerCurrentPauseMs = BUZZER_BEEP_PAUSE_MS;
+volatile unsigned long buzzerNextToggleMs = 0;
+volatile bool buzzerIsSounding = false;
+
+void buzzerSoundOn() {
+#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
+#if BUZZER_IS_ACTIVE
+  digitalWrite(BUZZER_PIN, BUZZER_ACTIVE_HIGH ? HIGH : LOW);
+#else
+  tone(BUZZER_PIN, BUZZER_TONE_FREQ);
+#endif
+#endif
+}
+
+void buzzerSoundOff() {
+#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
+#if BUZZER_IS_ACTIVE
+  digitalWrite(BUZZER_PIN, BUZZER_ACTIVE_HIGH ? LOW : HIGH);
+#else
+  noTone(BUZZER_PIN);
+#endif
+#endif
+}
+
+void triggerBuzzerBeep(int beeps = BUZZER_NOTICE_BEEPS, int durationMs = BUZZER_BEEP_DURATION_MS, int pauseMs = BUZZER_BEEP_PAUSE_MS) {
+#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
+  buzzerBeepsRemaining = beeps;
+  buzzerCurrentDurationMs = durationMs;
+  buzzerCurrentPauseMs = pauseMs;
+  buzzerNextToggleMs = millis();
+  buzzerIsSounding = false;
+#endif
+}
+
+void triggerNoticeBeep() {
+  triggerBuzzerBeep(BUZZER_NOTICE_BEEPS, BUZZER_BEEP_DURATION_MS, BUZZER_BEEP_PAUSE_MS);
+}
+
+void handleBuzzer() {
+#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
+  if (buzzerBeepsRemaining <= 0) return;
+  unsigned long now = millis();
+  if (now >= buzzerNextToggleMs) {
+    if (!buzzerIsSounding) {
+      buzzerSoundOn();
+      buzzerIsSounding = true;
+      buzzerNextToggleMs = now + buzzerCurrentDurationMs;
+    } else {
+      buzzerSoundOff();
+      buzzerIsSounding = false;
+      buzzerBeepsRemaining--;
+      if (buzzerBeepsRemaining > 0) {
+        buzzerNextToggleMs = now + buzzerCurrentPauseMs;
+      }
+    }
+  }
+#endif
+}
+
+// ==========================================
 // --- SYSTEM STATE & THRESHOLDS ---
 // ==========================================
 volatile bool isAutoMode = false; // Loaded from NVS in setup()
@@ -1111,6 +1175,7 @@ void addOrUpdateNotice(String id, String clsId, String title, String msg, String
       if (triggerPopup && contentChanged) {
         newNoticePopupUntilMs = millis() + 15000UL;
         activeNoticePopupIndex = i;
+        triggerNoticeBeep();
       }
       currentNoticeDisplayIndex = i;
       if (saveNvs) saveNoticesToNVS();
@@ -1151,6 +1216,7 @@ void addOrUpdateNotice(String id, String clsId, String title, String msg, String
   if (triggerPopup) {
     newNoticePopupUntilMs = millis() + 15000UL;
     activeNoticePopupIndex = targetIdx;
+    triggerNoticeBeep();
   }
   currentNoticeDisplayIndex = targetIdx;
   singleOledNoticeIdx = targetIdx;
@@ -1679,6 +1745,13 @@ void handleTimeSync() {
   server.send(400, "application/json", "{\"error\":\"invalid epoch\"}");
 }
 
+// REST Handler to Test 3V Audio Buzzer
+void handleBuzzerTest() {
+  enableCORS();
+  triggerNoticeBeep();
+  server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Buzzer alert beep triggered\"}");
+}
+
 // ==========================================
 // --- REST API: ROOT ---
 // ==========================================
@@ -1800,6 +1873,14 @@ void setup() {
   pinMode(LDR_CORRIDOR2_PIN, INPUT);
   pinMode(ACS712_CURRENT_PIN, INPUT);
   pinMode(ZMPT101B_VOLTAGE_PIN, INPUT);
+
+  // 1b. Initialize 3V Audio Alert Buzzer
+#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
+  pinMode(BUZZER_PIN, OUTPUT);
+  buzzerSoundOff();
+  Serial.printf("[HARDWARE] 3V Alert Buzzer initialized on GPIO %d (Type: %s)\n", 
+                BUZZER_PIN, BUZZER_IS_ACTIVE ? "ACTIVE" : "PASSIVE");
+#endif
 
   // 2. Initialize Relay Output Pins
   pinMode(RELAY_CLASS_LIGHT1, OUTPUT);
@@ -1969,6 +2050,8 @@ void setup() {
   server.on("/api/notice/delete", HTTP_ANY, handleNoticeDelete);
   server.on("/api/notice/delete", HTTP_OPTIONS, handleOptions);
   server.on("/api/time", HTTP_ANY, handleTimeSync);
+  server.on("/api/buzzer", HTTP_ANY, handleBuzzerTest);
+  server.on("/api/buzzer", HTTP_OPTIONS, handleOptions);
 
   server.onNotFound(handleNotFound); // Captive portal redirect & CORS preflight
   server.begin();
@@ -2457,6 +2540,26 @@ void reconcileNoticesFromCloud(JsonArray cloudNotices) {
   }
 
   if (changed) {
+    // Check if there is a brand new notice that didn't exist locally before
+    bool hasBrandNewNotice = false;
+    for (int i = 0; i < updatedCount; i++) {
+      bool exists = false;
+      for (int k = 0; k < noticeCount; k++) {
+        if (notices[k].id == updated[i].id) {
+          exists = true;
+          break;
+        }
+      }
+      if (!exists) {
+        hasBrandNewNotice = true;
+        break;
+      }
+    }
+
+    if (hasBrandNewNotice && cloud_initialized) {
+      triggerNoticeBeep();
+    }
+
     // Preserve breaking notice popup if the notice still exists
     bool keepPopup = false;
     if (newNoticePopupUntilMs > millis() && activeNoticePopupIndex >= 0 && activeNoticePopupIndex < noticeCount) {
@@ -2546,7 +2649,10 @@ void loop() {
   // 1b. Process incoming HTTP client requests
   server.handleClient();
 
-  // 1c. Wi-Fi Disconnect Watchdog:
+  // 1c. Non-blocking Audio Alert Buzzer
+  handleBuzzer();
+
+  // 1d. Wi-Fi Disconnect Watchdog:
   // If Wi-Fi was connected but drops while running, wait WIFI_CONNECT_TIMEOUT_SEC then launch Hotspot
   static unsigned long wifiLostTimestamp = 0;
   if (!isApSetupMode) {
