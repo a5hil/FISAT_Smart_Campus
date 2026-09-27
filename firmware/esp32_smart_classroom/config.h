@@ -184,8 +184,26 @@ const unsigned long POWER_METER_SAMPLE_MS =
 // Readings ABOVE this threshold indicate darkness (turn on lights)
 const int DEFAULT_LDR_THRESHOLD = 2000;
 
+// LDR Hysteresis deadband (counts):
+// Turn ON at (threshold + LDR_HYSTERESIS), Turn OFF at (threshold - LDR_HYSTERESIS)
+// Prevents boundary relay chatter and flicker around the threshold
+const int LDR_HYSTERESIS = 250;
+
+// Corridor Light Hold Timer (milliseconds):
+// Keeps corridor lights ON for at least 15s after darkness triggers.
+// Completely prevents optical feedback where the corridor light's own brightness turns itself off!
+const unsigned long CORRIDOR_HOLD_MS = 15000;
+
+// LDR sampling & debounce timers
+const unsigned long LDR_SAMPLE_INTERVAL_MS = 50; // Smooth ADC sampling every 50ms
+const unsigned long LDR_DEBOUNCE_MS = 600;       // Must remain dark continuously for 600ms to trigger
+
 // Temperature threshold in Celsius to activate fans in occupied rooms
 const float DEFAULT_TEMP_THRESHOLD = 26.0;
+const float TEMP_HYSTERESIS = 0.5; // 0.5 deg C hysteresis band for fan relay
+
+// Relay anti-chatter hardware guard (ms)
+const unsigned long RELAY_MIN_SWITCH_INTERVAL_MS = 500;
 
 // Occupancy hold timer (in milliseconds):
 // Keeps lights/fans active after motion is detected. Prevents flickering

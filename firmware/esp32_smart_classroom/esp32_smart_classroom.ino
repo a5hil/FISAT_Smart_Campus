@@ -785,40 +785,55 @@ void applyRelayStates() {
   static int hw_corr1 = -1;
   static int hw_corr2 = -1;
 
+  static unsigned long last_switch_c1_l = 0;
+  static unsigned long last_switch_c1_f = 0;
+  static unsigned long last_switch_c2_l = 0;
+  static unsigned long last_switch_c2_f = 0;
+  static unsigned long last_switch_corr1 = 0;
+  static unsigned long last_switch_corr2 = 0;
+
+  unsigned long now = millis();
+
   int t_c1_l = state_c1_light ? RELAY_ON : RELAY_OFF;
-  if (hw_c1_light != t_c1_l) {
+  if (hw_c1_light != t_c1_l && (hw_c1_light == -1 || now - last_switch_c1_l >= RELAY_MIN_SWITCH_INTERVAL_MS)) {
     digitalWrite(RELAY_CLASS_LIGHT1, t_c1_l);
     hw_c1_light = t_c1_l;
+    last_switch_c1_l = now;
   }
 
   int t_c1_f = state_c1_fan ? RELAY_ON : RELAY_OFF;
-  if (hw_c1_fan != t_c1_f) {
+  if (hw_c1_fan != t_c1_f && (hw_c1_fan == -1 || now - last_switch_c1_f >= RELAY_MIN_SWITCH_INTERVAL_MS)) {
     digitalWrite(RELAY_CLASS_FAN1, t_c1_f);
     hw_c1_fan = t_c1_f;
+    last_switch_c1_f = now;
   }
 
   int t_c2_l = state_c2_light ? RELAY_ON : RELAY_OFF;
-  if (hw_c2_light != t_c2_l) {
+  if (hw_c2_light != t_c2_l && (hw_c2_light == -1 || now - last_switch_c2_l >= RELAY_MIN_SWITCH_INTERVAL_MS)) {
     digitalWrite(RELAY_CLASS_LIGHT2, t_c2_l);
     hw_c2_light = t_c2_l;
+    last_switch_c2_l = now;
   }
 
   int t_c2_f = state_c2_fan ? RELAY_ON : RELAY_OFF;
-  if (hw_c2_fan != t_c2_f) {
+  if (hw_c2_fan != t_c2_f && (hw_c2_fan == -1 || now - last_switch_c2_f >= RELAY_MIN_SWITCH_INTERVAL_MS)) {
     digitalWrite(RELAY_CLASS_FAN2, t_c2_f);
     hw_c2_fan = t_c2_f;
+    last_switch_c2_f = now;
   }
 
   int t_cr1 = state_corr1_light ? RELAY_ON : RELAY_OFF;
-  if (hw_corr1 != t_cr1) {
+  if (hw_corr1 != t_cr1 && (hw_corr1 == -1 || now - last_switch_corr1 >= RELAY_MIN_SWITCH_INTERVAL_MS)) {
     digitalWrite(RELAY_CORRIDOR_LIGHT1, t_cr1);
     hw_corr1 = t_cr1;
+    last_switch_corr1 = now;
   }
 
   int t_cr2 = state_corr2_light ? RELAY_ON : RELAY_OFF;
-  if (hw_corr2 != t_cr2) {
+  if (hw_corr2 != t_cr2 && (hw_corr2 == -1 || now - last_switch_corr2 >= RELAY_MIN_SWITCH_INTERVAL_MS)) {
     digitalWrite(RELAY_CORRIDOR_LIGHT2, t_cr2);
     hw_corr2 = t_cr2;
+    last_switch_corr2 = now;
   }
 }
 
@@ -3226,11 +3241,35 @@ void loop() {
     lastDhtRead = millis();
   }
 
-  // 3. Sample PIR Motion & Corridor LDRs
+  unsigned long now = millis();
+
+  // 3. Sample PIR Motion & Filtered Corridor LDRs
   pir1_active = (digitalRead(PIR1_PIN) == HIGH);
   pir2_active = (digitalRead(PIR2_PIN) == HIGH);
-  ldr1_value = analogRead(LDR_CORRIDOR1_PIN);
-  ldr2_value = analogRead(LDR_CORRIDOR2_PIN);
+
+  // Smooth LDR sampling at controlled interval to filter ADC multiplexer noise & relay coil spikes
+  static float ldr1_filtered = 2000.0f;
+  static float ldr2_filtered = 2000.0f;
+  static unsigned long lastLdrSampleMs = 0;
+  static bool ldrInitialized = false;
+
+  if (!ldrInitialized) {
+    ldr1_filtered = (float)analogRead(LDR_CORRIDOR1_PIN);
+    ldr2_filtered = (float)analogRead(LDR_CORRIDOR2_PIN);
+    ldr1_value = (int)ldr1_filtered;
+    ldr2_value = (int)ldr2_filtered;
+    ldrInitialized = true;
+    lastLdrSampleMs = now;
+  } else if (now - lastLdrSampleMs >= LDR_SAMPLE_INTERVAL_MS) {
+    lastLdrSampleMs = now;
+    int raw1 = analogRead(LDR_CORRIDOR1_PIN);
+    int raw2 = analogRead(LDR_CORRIDOR2_PIN);
+    // Smooth low-pass filter (alpha = 0.20)
+    ldr1_filtered = (ldr1_filtered * 0.80f) + (raw1 * 0.20f);
+    ldr2_filtered = (ldr2_filtered * 0.80f) + (raw2 * 0.20f);
+    ldr1_value = (int)ldr1_filtered;
+    ldr2_value = (int)ldr2_filtered;
+  }
 
   // 3b. Sample Classroom A101 AC Power Meter (ACS712 & ZMPT101B)
   sampleA101PowerMeter();
@@ -3239,8 +3278,6 @@ void loop() {
   integrateRealEnergy();
 
   // 4. Classroom Occupancy State Machines (Debounced Hold Timer)
-  unsigned long now = millis();
-
   // Classroom 1 Occupancy
   if (pir1_active) {
     c1_last_motion = now;
@@ -3259,26 +3296,88 @@ void loop() {
 
   // 5. Intelligent Automation Logic (Only active when isAutoMode == true)
   if (isAutoMode) {
-    // Corridor Automation: Dark environment activates lights
-    state_corr1_light = (ldr1_value > currentLdrThreshold);
-    state_corr2_light = (ldr2_value > currentLdrThreshold);
+    // Corridor Automation with Hysteresis, Debounce, and Anti-Feedback Minimum Hold Time:
+    // Prevents optical feedback (light turning itself off) and boundary relay chatter
+    static unsigned long corr1_dark_start = 0;
+    static unsigned long corr1_last_turn_on = 0;
+    static unsigned long corr2_dark_start = 0;
+    static unsigned long corr2_last_turn_on = 0;
 
-    // Classroom 1 Automation
+    int onThreshold = currentLdrThreshold + LDR_HYSTERESIS;
+    int offThreshold = currentLdrThreshold - LDR_HYSTERESIS;
+
+    // --- Corridor 1 Light Automation ---
+    if (!state_corr1_light) {
+      // Light is currently OFF: Must remain dark (> onThreshold) consistently for LDR_DEBOUNCE_MS
+      if (ldr1_value > onThreshold) {
+        if (corr1_dark_start == 0) {
+          corr1_dark_start = now;
+        } else if (now - corr1_dark_start >= LDR_DEBOUNCE_MS) {
+          state_corr1_light = true;
+          corr1_last_turn_on = now;
+          corr1_dark_start = 0;
+        }
+      } else {
+        corr1_dark_start = 0;
+      }
+    } else {
+      // Light is currently ON:
+      // Minimum hold time: Must stay ON for at least CORRIDOR_HOLD_MS (15s)
+      // This completely shields against light bounce/reflection turning the relay off!
+      if (now - corr1_last_turn_on >= CORRIDOR_HOLD_MS) {
+        if (ldr1_value < offThreshold) {
+          state_corr1_light = false;
+          corr1_dark_start = 0;
+        }
+      }
+    }
+
+    // --- Corridor 2 Light Automation ---
+    if (!state_corr2_light) {
+      if (ldr2_value > onThreshold) {
+        if (corr2_dark_start == 0) {
+          corr2_dark_start = now;
+        } else if (now - corr2_dark_start >= LDR_DEBOUNCE_MS) {
+          state_corr2_light = true;
+          corr2_last_turn_on = now;
+          corr2_dark_start = 0;
+        }
+      } else {
+        corr2_dark_start = 0;
+      }
+    } else {
+      if (now - corr2_last_turn_on >= CORRIDOR_HOLD_MS) {
+        if (ldr2_value < offThreshold) {
+          state_corr2_light = false;
+          corr2_dark_start = 0;
+        }
+      }
+    }
+
+    // Classroom 1 Automation (with Temperature Hysteresis for Fan)
     if (c1_occupied) {
       state_c1_light = true;
       state_c1_curtain = true;
-      state_c1_fan = (currentTemp > currentTempThreshold);
+      if (!state_c1_fan && currentTemp > (currentTempThreshold + TEMP_HYSTERESIS)) {
+        state_c1_fan = true;
+      } else if (state_c1_fan && currentTemp < (currentTempThreshold - TEMP_HYSTERESIS)) {
+        state_c1_fan = false;
+      }
     } else {
       state_c1_light = false;
       state_c1_curtain = false;
       state_c1_fan = false;
     }
 
-    // Classroom 2 Automation
+    // Classroom 2 Automation (with Temperature Hysteresis for Fan)
     if (c2_occupied) {
       state_c2_light = true;
       state_c2_curtain = true;
-      state_c2_fan = (currentTemp > currentTempThreshold);
+      if (!state_c2_fan && currentTemp > (currentTempThreshold + TEMP_HYSTERESIS)) {
+        state_c2_fan = true;
+      } else if (state_c2_fan && currentTemp < (currentTempThreshold - TEMP_HYSTERESIS)) {
+        state_c2_fan = false;
+      }
     } else {
       state_c2_light = false;
       state_c2_curtain = false;
