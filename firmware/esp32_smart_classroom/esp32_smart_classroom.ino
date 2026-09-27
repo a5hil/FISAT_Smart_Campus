@@ -1871,6 +1871,82 @@ void startSetupHotspot() {
 }
 
 // ==========================================
+// --- FISAT DEPARTMENT BOOT ANIMATION ---
+// Adapted from Lopaka screen layout for Adafruit SSD1306
+// ==========================================
+void drawScreen_1(Adafruit_SSD1306 &disp, int progressPercent = -1) {
+  disp.clearDisplay();
+  disp.setTextColor(SSD1306_WHITE);
+
+  // String 1: "FISAT" (Large, Bold Heading - Height 24px)
+  disp.setTextSize(3);
+  disp.setCursor(19, 6);
+  disp.print(F("FISAT"));
+
+  // Subtle separator line under FISAT
+  disp.drawLine(14, 34, 114, 34, SSD1306_WHITE);
+
+  // String 2: "DEPARTMENT OF"
+  disp.setTextSize(1);
+  disp.setCursor(26, 38);
+  disp.print(F("DEPARTMENT OF"));
+
+  // String 2 Copy 1: "COMPUTER APPLICATIONS"
+  disp.setCursor(2, 50);
+  disp.print(F("COMPUTER APPLICATIONS"));
+
+  // Optional Smooth Boot Progress Bar at bottom (y=61..63)
+  if (progressPercent >= 0) {
+    disp.drawRect(14, 61, 100, 3, SSD1306_WHITE);
+    int barWidth = map(constrain(progressPercent, 0, 100), 0, 100, 0, 98);
+    if (barWidth > 0) {
+      disp.fillRect(15, 62, barWidth, 1, SSD1306_WHITE);
+    }
+  }
+  disp.display();
+}
+
+void playBootAnimation() {
+  if (!oledFound && !noticeOledFound) return;
+
+  Serial.println(F("[BOOT] Playing FISAT boot animation on dual displays..."));
+
+  // Stage 1: Animated center accent line expanding outward
+  for (int w = 4; w <= 100; w += 16) {
+    if (oledFound) {
+      display.clearDisplay();
+      display.drawLine(64 - w / 2, 34, 64 + w / 2, 34, SSD1306_WHITE);
+      display.display();
+    }
+    if (noticeOledFound) {
+      displayNotice.clearDisplay();
+      displayNotice.drawLine(64 - w / 2, 34, 64 + w / 2, 34, SSD1306_WHITE);
+      displayNotice.display();
+    }
+    delay(25);
+  }
+
+  // Stage 2: Welcome audio chirp on 3V buzzer
+#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
+  buzzerSoundOn();
+  delay(35);
+  buzzerSoundOff();
+#endif
+
+  // Stage 3: Smooth loading progress bar revealing full FISAT Department banner
+  for (int p = 0; p <= 100; p += 10) {
+    if (oledFound) drawScreen_1(display, p);
+    if (noticeOledFound) drawScreen_1(displayNotice, p);
+    delay(45);
+  }
+
+  // Stage 4: Hold complete branding screen for 2.0 seconds so it is clearly visible
+  if (oledFound) drawScreen_1(display, 100);
+  if (noticeOledFound) drawScreen_1(displayNotice, 100);
+  delay(2000);
+}
+
+// ==========================================
 // --- SETUP INITIALIZATION ---
 // ==========================================
 void setup() {
@@ -1990,6 +2066,9 @@ void setup() {
     Serial.println(
         F("[WARN] Notice Board OLED SSD1306 allocation failed on Wire1 (GPIO 13/15)"));
   }
+
+  // 4C. Play FISAT Department Boot Animation on Both Displays Simultaneously
+  playBootAnimation();
 
   // 5. Connect to Wi-Fi (Load from NVS Preferences or fallback to config.h defaults)
   configured_ssid = preferences.getString("wifi_ssid", DEFAULT_WIFI_SSID);
