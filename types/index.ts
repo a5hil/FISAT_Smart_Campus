@@ -206,3 +206,22 @@ export interface NoticeItem {
   expiresAt?: string | null;
   isActive: boolean;
 }
+
+export type BellPattern = 'college-bell' | 'triple-chime' | 'double-beep' | 'single-long';
+
+export interface TimetablePeriod {
+  id: string;
+  name: string;
+  startTime: string; // "09:00" (HH:mm)
+  endTime: string;   // "10:00"
+  type: 'class' | 'break' | 'lunch' | 'lab';
+  enabled: boolean;
+  bellPattern?: BellPattern;
+}
+
+export interface TimetableConfig {
+  enabled: boolean;
+  activeDays: number[]; // 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+  defaultPattern: BellPattern;
+  periods: TimetablePeriod[];
+}

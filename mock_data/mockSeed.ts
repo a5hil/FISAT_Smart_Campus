@@ -1,7 +1,7 @@
 import {
   User, Campus, Classroom, Controller, Device, Alert,
   NotificationItem, ActivityItem, EnergyReading,
-  DeviceCategory, DeviceCapability,
+  DeviceCategory, DeviceCapability, TimetableConfig,
 } from '../types';
 
 export const mockUser: User = {
@@ -179,5 +179,21 @@ export const mockEnergyData: { hourly: EnergyReading[]; daily: EnergyReading[]; 
   weekly: [
     { time: 'Week 1', value: 0.0 }, { time: 'Week 2', value: 0.0 },
     { time: 'Week 3', value: 0.0 }, { time: 'Current', value: 0.0 },
+  ],
+};
+
+export const defaultTimetable: TimetableConfig = {
+  enabled: true,
+  activeDays: [1, 2, 3, 4, 5], // Monday to Friday
+  defaultPattern: 'college-bell',
+  periods: [
+    { id: 'p-1', name: 'Period 1 (Hour 1)', startTime: '09:00', endTime: '10:00', type: 'class', enabled: true },
+    { id: 'p-2', name: 'Period 2 (Hour 2)', startTime: '10:00', endTime: '11:00', type: 'class', enabled: true },
+    { id: 'p-break', name: 'Tea Break', startTime: '11:00', endTime: '11:15', type: 'break', enabled: true, bellPattern: 'double-beep' },
+    { id: 'p-3', name: 'Period 3 (Hour 3)', startTime: '11:15', endTime: '12:15', type: 'class', enabled: true },
+    { id: 'p-4', name: 'Period 4 (Hour 4)', startTime: '12:15', endTime: '13:15', type: 'class', enabled: true },
+    { id: 'p-lunch', name: 'Lunch Break', startTime: '13:15', endTime: '14:00', type: 'lunch', enabled: true, bellPattern: 'triple-chime' },
+    { id: 'p-5', name: 'Period 5 (Hour 5)', startTime: '14:00', endTime: '15:00', type: 'class', enabled: true },
+    { id: 'p-6', name: 'Period 6 (Hour 6)', startTime: '15:00', endTime: '16:00', type: 'class', enabled: true },
   ],
 };

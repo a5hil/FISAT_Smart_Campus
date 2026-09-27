@@ -6,4 +6,5 @@ export {
   mockNotifications,
   mockEnergyData,
   devsA101,
+  defaultTimetable,
 } from './mockSeed';

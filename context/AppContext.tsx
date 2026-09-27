@@ -4,10 +4,10 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import {
   User, Campus, Classroom, Device, Controller, Alert, NotificationItem, ActivityItem, EnergyReading,
   DeviceCategory, DeviceStatus, DeviceCapability, ClassroomStatus, OccupancyStatus, AlertSeverity, NotificationType,
-  ESP32Telemetry, NoticeItem, NoticeDuration,
+  ESP32Telemetry, NoticeItem, NoticeDuration, TimetableConfig, TimetablePeriod, BellPattern,
 } from '../types';
 import {
-  mockUser, mockCampus, mockClassrooms, mockAlerts, mockNotifications, mockEnergyData, devsA101,
+  mockUser, mockCampus, mockClassrooms, mockAlerts, mockNotifications, mockEnergyData, devsA101, defaultTimetable,
 } from '../mock_data/mockData';
 
 interface QuickControls {
@@ -56,6 +56,9 @@ interface AppContextType {
   notices: NoticeItem[];
   addNotice: (notice: Omit<NoticeItem, 'id' | 'createdAt' | 'isActive'>) => Promise<boolean>;
   deleteNotice: (id: string) => Promise<boolean>;
+  timetable: TimetableConfig;
+  updateTimetable: (config: TimetableConfig) => Promise<void>;
+  triggerBellTest: (pattern?: BellPattern) => Promise<{ success: boolean; message: string }>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -74,6 +77,7 @@ const STORAGE_KEYS = {
   ESP32_IP: '@esp32_ip',
   SYSTEM_MODE: '@system_mode',
   NOTICES: '@notices',
+  TIMETABLE: '@timetable',
 };
 
 const SETTING_KEYS = ['brightness', 'speed', 'temperature', 'mode', 'fanSpeed', 'volume', 'source', 'direction', 'colorTemp'] as const;
@@ -281,6 +285,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [alerts, setAlerts] = useState<Alert[]>(mockAlerts);
   const [notifications, setNotifications] = useState<NotificationItem[]>(mockNotifications);
   const [notices, setNotices] = useState<NoticeItem[]>([]);
+  const [timetable, setTimetable] = useState<TimetableConfig>(defaultTimetable);
   const [energyData, setEnergyData] = useState(mockEnergyData);
   const [quickControls, setQuickControls] = useState<QuickControls>({
     allLights: false, allFans: false, allCurtains: false,
@@ -464,6 +469,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
               const parsed = JSON.parse(storedNotices);
               const now = Date.now();
               setNotices(parsed.filter((n: NoticeItem) => !n.expiresAt || new Date(n.expiresAt).getTime() > now));
+            } catch {}
+          }
+
+          const storedTimetable = await AsyncStorage.getItem(STORAGE_KEYS.TIMETABLE);
+          if (storedTimetable) {
+            try {
+              setTimetable(JSON.parse(storedTimetable));
             } catch {}
           }
 
@@ -1696,6 +1708,73 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [esp32Ip, showToast]);
 
+  const updateTimetable = useCallback(async (newConfig: TimetableConfig) => {
+    setTimetable(newConfig);
+    await AsyncStorage.setItem(STORAGE_KEYS.TIMETABLE, JSON.stringify(newConfig)).catch(console.error);
+
+    // Send timetable to ESP32 for autonomous clock triggers
+    const candidateIps = new Set<string>();
+    if (esp32Ip && esp32Ip.trim()) candidateIps.add(esp32Ip.trim());
+    for (const c of classrooms) {
+      if (c.controller?.ipAddress && c.controller.ipAddress.trim()) {
+        candidateIps.add(c.controller.ipAddress.trim());
+      }
+    }
+
+    candidateIps.forEach(ip => {
+      const cleanIp = ip.trim();
+      const baseUrl = cleanIp.startsWith('http') ? cleanIp : `http://${cleanIp}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2000);
+      fetch(`${baseUrl}/api/timetable`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newConfig),
+        signal: controller.signal,
+      }).then(() => clearTimeout(timer)).catch(() => clearTimeout(timer));
+    });
+
+    showToast('Class Timetable & Bell Schedule Saved', 'success');
+  }, [classrooms, esp32Ip, showToast]);
+
+  const triggerBellTest = useCallback(async (pattern: BellPattern = 'college-bell') => {
+    const candidateIps = new Set<string>();
+    if (esp32Ip && esp32Ip.trim()) candidateIps.add(esp32Ip.trim());
+    for (const c of classrooms) {
+      if (c.controller?.ipAddress && c.controller.ipAddress.trim()) {
+        candidateIps.add(c.controller.ipAddress.trim());
+      }
+    }
+
+    if (candidateIps.size === 0) {
+      return { success: false, message: 'ESP32 Controller offline or IP not configured' };
+    }
+
+    let success = false;
+    for (const ip of candidateIps) {
+      try {
+        const cleanIp = ip.trim();
+        const baseUrl = cleanIp.startsWith('http') ? cleanIp : `http://${cleanIp}`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 2500);
+        const res = await fetch(`${baseUrl}/api/bell?pattern=${encodeURIComponent(pattern)}`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          success = true;
+          break;
+        }
+      } catch {}
+    }
+
+    if (success) {
+      showToast(`Period Bell (${pattern}) Chimed!`, 'success');
+      return { success: true, message: 'Bell chimed successfully' };
+    }
+    return { success: false, message: 'Could not reach ESP32 to test bell' };
+  }, [classrooms, esp32Ip, showToast]);
+
 
   if (!isReady) return null;
 
@@ -1713,6 +1792,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       syncWithEsp32, toggleEsp32Mode,
       updateEsp32WiFi,
       notices, addNotice, deleteNotice,
+      timetable, updateTimetable, triggerBellTest,
     }}>
       {children}
     </AppContext.Provider>

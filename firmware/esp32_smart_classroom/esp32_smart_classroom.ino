@@ -80,13 +80,17 @@ Servo curtain2;
 Preferences preferences;
 
 // ==========================================
-// --- 3V BUZZER AUDIO ALERT STATE ---
+// --- 3V BUZZER AUDIO ALERT & PATTERN SEQUENCER ---
 // ==========================================
-volatile int buzzerBeepsRemaining = 0;
-volatile int buzzerCurrentDurationMs = BUZZER_BEEP_DURATION_MS;
-volatile int buzzerCurrentPauseMs = BUZZER_BEEP_PAUSE_MS;
-volatile unsigned long buzzerNextToggleMs = 0;
-volatile bool buzzerIsSounding = false;
+#define MAX_BELL_STEPS 16
+struct BuzzerStep {
+  bool soundOn;
+  int durationMs;
+};
+BuzzerStep buzzerSteps[MAX_BELL_STEPS];
+volatile int buzzerStepCount = 0;
+volatile int buzzerStepIndex = -1;
+volatile unsigned long nextBuzzerStepMs = 0;
 
 void buzzerSoundOn() {
 #if defined(BUZZER_PIN) && BUZZER_PIN >= 0
@@ -108,39 +112,284 @@ void buzzerSoundOff() {
 #endif
 }
 
-void triggerBuzzerBeep(int beeps = BUZZER_NOTICE_BEEPS, int durationMs = BUZZER_BEEP_DURATION_MS, int pauseMs = BUZZER_BEEP_PAUSE_MS) {
+void playBellPattern(const char* pattern) {
 #if defined(BUZZER_PIN) && BUZZER_PIN >= 0
-  buzzerBeepsRemaining = beeps;
-  buzzerCurrentDurationMs = durationMs;
-  buzzerCurrentPauseMs = pauseMs;
-  buzzerNextToggleMs = millis();
-  buzzerIsSounding = false;
+  buzzerStepCount = 0;
+  buzzerStepIndex = -1;
+  buzzerSoundOff();
+
+  String p = String(pattern);
+  p.toLowerCase();
+
+  if (p == "college-bell") {
+    // Academic classic 3 long rings
+    buzzerSteps[0] = { true, 1000 };
+    buzzerSteps[1] = { false, 350 };
+    buzzerSteps[2] = { true, 1000 };
+    buzzerSteps[3] = { false, 350 };
+    buzzerSteps[4] = { true, 1600 };
+    buzzerStepCount = 5;
+  } else if (p == "triple-chime") {
+    // 3 distinct rhythmic chimes
+    buzzerSteps[0] = { true, 300 };
+    buzzerSteps[1] = { false, 150 };
+    buzzerSteps[2] = { true, 300 };
+    buzzerSteps[3] = { false, 150 };
+    buzzerSteps[4] = { true, 500 };
+    buzzerStepCount = 5;
+  } else if (p == "double-beep") {
+    // 2 crisp alert beeps
+    buzzerSteps[0] = { true, 250 };
+    buzzerSteps[1] = { false, 150 };
+    buzzerSteps[2] = { true, 250 };
+    buzzerStepCount = 3;
+  } else if (p == "single-long") {
+    // Sustained 2-second alert bell
+    buzzerSteps[0] = { true, 2000 };
+    buzzerStepCount = 1;
+  } else {
+    // Default fallback: 2 medium beeps
+    buzzerSteps[0] = { true, 400 };
+    buzzerSteps[1] = { false, 200 };
+    buzzerSteps[2] = { true, 600 };
+    buzzerStepCount = 3;
+  }
+
+  buzzerStepIndex = 0;
+  if (buzzerSteps[0].soundOn) {
+    buzzerSoundOn();
+  } else {
+    buzzerSoundOff();
+  }
+  nextBuzzerStepMs = millis() + buzzerSteps[0].durationMs;
+  Serial.printf("[BUZZER] Playing bell pattern: '%s' (%d steps)\n", pattern, buzzerStepCount);
 #endif
 }
 
 void triggerNoticeBeep() {
-  triggerBuzzerBeep(BUZZER_NOTICE_BEEPS, BUZZER_BEEP_DURATION_MS, BUZZER_BEEP_PAUSE_MS);
+#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
+  buzzerStepCount = 0;
+  buzzerStepIndex = -1;
+  buzzerSoundOff();
+
+  // Short dual blip for incoming notices
+  buzzerSteps[0] = { true, BUZZER_BEEP_DURATION_MS };
+  buzzerSteps[1] = { false, BUZZER_BEEP_PAUSE_MS };
+  buzzerSteps[2] = { true, BUZZER_BEEP_DURATION_MS };
+  buzzerStepCount = 3;
+
+  buzzerStepIndex = 0;
+  buzzerSoundOn();
+  nextBuzzerStepMs = millis() + buzzerSteps[0].durationMs;
+#endif
 }
 
 void handleBuzzer() {
 #if defined(BUZZER_PIN) && BUZZER_PIN >= 0
-  if (buzzerBeepsRemaining <= 0) return;
+  if (buzzerStepIndex < 0 || buzzerStepIndex >= buzzerStepCount) return;
+
   unsigned long now = millis();
-  if (now >= buzzerNextToggleMs) {
-    if (!buzzerIsSounding) {
-      buzzerSoundOn();
-      buzzerIsSounding = true;
-      buzzerNextToggleMs = now + buzzerCurrentDurationMs;
+  if (now >= nextBuzzerStepMs) {
+    buzzerStepIndex++;
+    if (buzzerStepIndex < buzzerStepCount) {
+      if (buzzerSteps[buzzerStepIndex].soundOn) {
+        buzzerSoundOn();
+      } else {
+        buzzerSoundOff();
+      }
+      nextBuzzerStepMs = now + buzzerSteps[buzzerStepIndex].durationMs;
     } else {
       buzzerSoundOff();
-      buzzerIsSounding = false;
-      buzzerBeepsRemaining--;
-      if (buzzerBeepsRemaining > 0) {
-        buzzerNextToggleMs = now + buzzerCurrentPauseMs;
-      }
+      buzzerStepIndex = -1;
+      buzzerStepCount = 0;
     }
   }
 #endif
+}
+
+// ==========================================
+// --- TIMETABLE & PERIOD BELL STATE ---
+// ==========================================
+struct TimetablePeriodFirmware {
+  char id[16];
+  char name[32];
+  int startHour;
+  int startMin;
+  int endHour;
+  int endMin;
+  char type[12]; // "class", "break", "lunch", "lab"
+  bool enabled;
+  char pattern[20];
+};
+
+#define MAX_TIMETABLE_PERIODS 12
+TimetablePeriodFirmware timetablePeriods[MAX_TIMETABLE_PERIODS];
+int timetablePeriodCount = 0;
+bool timetableEnabled = true;
+uint8_t timetableActiveDays = 0b00111110; // Bits 1..5 (Mon..Fri)
+char timetableDefaultPattern[24] = "college-bell";
+
+int lastBellRungHour = -1;
+int lastBellRungMin = -1;
+char lastBellRungPeriodName[32] = "";
+volatile unsigned long periodOverAlertUntilMs = 0;
+
+void loadDefaultTimetable() {
+  timetableEnabled = true;
+  timetableActiveDays = 0b00111110;
+  strcpy(timetableDefaultPattern, "college-bell");
+  timetablePeriodCount = 8;
+
+  const char* ids[] = {"p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"};
+  const char* names[] = {
+    "Period 1: Mathematics",
+    "Period 2: Data Structures",
+    "Morning Tea Break",
+    "Period 3: Networks",
+    "Lunch Break",
+    "Period 4: IoT & Embedded",
+    "Period 5: Database Sys",
+    "Period 6: Lab Work"
+  };
+  int sH[] = {9, 10, 11, 11, 12, 13, 14, 15};
+  int sM[] = {0, 0, 0, 15, 15, 15, 15, 15};
+  int eH[] = {10, 11, 11, 12, 13, 14, 15, 16};
+  int eM[] = {0, 0, 15, 15, 15, 15, 15, 15};
+  const char* types[] = {"class", "class", "break", "class", "lunch", "class", "class", "lab"};
+  const char* pats[] = {"college-bell", "college-bell", "triple-chime", "college-bell", "triple-chime", "college-bell", "college-bell", "college-bell"};
+
+  for (int i = 0; i < 8; i++) {
+    strncpy(timetablePeriods[i].id, ids[i], sizeof(timetablePeriods[i].id) - 1);
+    strncpy(timetablePeriods[i].name, names[i], sizeof(timetablePeriods[i].name) - 1);
+    timetablePeriods[i].startHour = sH[i];
+    timetablePeriods[i].startMin = sM[i];
+    timetablePeriods[i].endHour = eH[i];
+    timetablePeriods[i].endMin = eM[i];
+    strncpy(timetablePeriods[i].type, types[i], sizeof(timetablePeriods[i].type) - 1);
+    timetablePeriods[i].enabled = true;
+    strncpy(timetablePeriods[i].pattern, pats[i], sizeof(timetablePeriods[i].pattern) - 1);
+  }
+}
+
+bool parseTimetableJson(const String& jsonStr) {
+  StaticJsonDocument<4096> doc;
+  DeserializationError err = deserializeJson(doc, jsonStr);
+  if (err) {
+    Serial.printf("[TIMETABLE] JSON deserialize failed: %s\n", err.c_str());
+    return false;
+  }
+
+  if (doc.containsKey("enabled")) {
+    timetableEnabled = doc["enabled"].as<bool>();
+  }
+  if (doc.containsKey("defaultPattern")) {
+    const char* dp = doc["defaultPattern"];
+    if (dp && strlen(dp) > 0) {
+      strncpy(timetableDefaultPattern, dp, sizeof(timetableDefaultPattern) - 1);
+    }
+  }
+  if (doc.containsKey("activeDays")) {
+    timetableActiveDays = 0;
+    JsonArray days = doc["activeDays"].as<JsonArray>();
+    for (int d : days) {
+      if (d >= 0 && d <= 6) {
+        timetableActiveDays |= (1 << d);
+      }
+    }
+  }
+
+  if (doc.containsKey("periods")) {
+    JsonArray pArr = doc["periods"].as<JsonArray>();
+    timetablePeriodCount = 0;
+    for (JsonObject obj : pArr) {
+      if (timetablePeriodCount >= MAX_TIMETABLE_PERIODS) break;
+      TimetablePeriodFirmware &p = timetablePeriods[timetablePeriodCount];
+
+      const char* pid = obj["id"] | "";
+      const char* pname = obj["name"] | "";
+      const char* ptype = obj["type"] | "class";
+      const char* ppat = obj["bellPattern"] | timetableDefaultPattern;
+      const char* st = obj["startTime"] | "09:00";
+      const char* et = obj["endTime"] | "10:00";
+      bool pen = obj.containsKey("enabled") ? obj["enabled"].as<bool>() : true;
+
+      strncpy(p.id, pid, sizeof(p.id) - 1);
+      strncpy(p.name, pname, sizeof(p.name) - 1);
+      strncpy(p.type, ptype, sizeof(p.type) - 1);
+      strncpy(p.pattern, ppat, sizeof(p.pattern) - 1);
+      p.enabled = pen;
+
+      sscanf(st, "%d:%d", &p.startHour, &p.startMin);
+      sscanf(et, "%d:%d", &p.endHour, &p.endMin);
+
+      timetablePeriodCount++;
+    }
+  }
+
+  Serial.printf("[TIMETABLE] Updated: %d periods, enabled=%d, defaultPattern=%s\n",
+                timetablePeriodCount, timetableEnabled, timetableDefaultPattern);
+  return true;
+}
+
+void saveTimetableToNVS(const String& jsonStr) {
+  preferences.putString("tt_json", jsonStr);
+}
+
+void loadTimetableFromNVS() {
+  String jsonStr = preferences.getString("tt_json", "");
+  if (jsonStr.length() > 10) {
+    if (!parseTimetableJson(jsonStr)) {
+      loadDefaultTimetable();
+    }
+  } else {
+    loadDefaultTimetable();
+  }
+}
+
+void checkTimetableBell() {
+  if (!timetableEnabled || timetablePeriodCount == 0) return;
+
+  static int lastCheckedSec = -1;
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo, 10)) {
+    return;
+  }
+
+  if (timeinfo.tm_sec == lastCheckedSec) return;
+  lastCheckedSec = timeinfo.tm_sec;
+
+  // Evaluate at the beginning of each minute (second == 0)
+  if (timeinfo.tm_sec != 0) return;
+
+  int currentDayBit = (1 << timeinfo.tm_wday);
+  if (!(timetableActiveDays & currentDayBit)) {
+    return;
+  }
+
+  int currentHour = timeinfo.tm_hour;
+  int currentMin = timeinfo.tm_min;
+
+  if (currentHour == lastBellRungHour && currentMin == lastBellRungMin) {
+    return;
+  }
+
+  for (int i = 0; i < timetablePeriodCount; i++) {
+    if (!timetablePeriods[i].enabled) continue;
+
+    if (timetablePeriods[i].endHour == currentHour && timetablePeriods[i].endMin == currentMin) {
+      lastBellRungHour = currentHour;
+      lastBellRungMin = currentMin;
+      strncpy(lastBellRungPeriodName, timetablePeriods[i].name, sizeof(lastBellRungPeriodName) - 1);
+      lastBellRungPeriodName[sizeof(lastBellRungPeriodName) - 1] = '\0';
+      periodOverAlertUntilMs = millis() + 10000;
+
+      const char* pat = (strlen(timetablePeriods[i].pattern) > 0) ? timetablePeriods[i].pattern : timetableDefaultPattern;
+      Serial.printf("[TIMETABLE] Period Ended: '%s' at %02d:%02d! Playing pattern: %s\n",
+                    timetablePeriods[i].name, currentHour, currentMin, pat);
+      playBellPattern(pat);
+      break;
+    }
+  }
 }
 
 // ==========================================
@@ -1479,6 +1728,30 @@ void updateNoticeBoardDisplay() {
     }
   }
 
+  // Priority: Period Over Alert Popup (10s duration)
+  if (now < periodOverAlertUntilMs) {
+    displayNotice.clearDisplay();
+    displayNotice.fillRect(0, 0, 128, 14, SSD1306_WHITE);
+    displayNotice.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+    displayNotice.setTextSize(1);
+    displayNotice.setCursor(10, 3);
+    displayNotice.print(F("*** PERIOD OVER ***"));
+
+    displayNotice.setTextColor(SSD1306_WHITE);
+    displayNotice.setCursor(0, 20);
+    displayNotice.print(F("Ended:"));
+    displayNotice.setCursor(0, 32);
+    String pName = String(lastBellRungPeriodName);
+    if (pName.length() > 21) pName = pName.substring(0, 18) + "...";
+    displayNotice.print(pName);
+
+    displayNotice.drawLine(0, 46, 128, 46, SSD1306_WHITE);
+    displayNotice.setCursor(0, 52);
+    displayNotice.printf("Time: %02d:%02d [BELL RUNG]", lastBellRungHour, lastBellRungMin);
+    displayNotice.display();
+    return;
+  }
+
   // Find notices targeted to Classroom A101 (or "all")
   int eligibleIndices[MAX_FIRMWARE_NOTICES];
   int eligibleCount = 0;
@@ -1790,8 +2063,71 @@ void handleTimeSync() {
 // REST Handler to Test 3V Audio Buzzer
 void handleBuzzerTest() {
   enableCORS();
-  triggerNoticeBeep();
-  server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Buzzer alert beep triggered\"}");
+  if (server.hasArg("pattern")) {
+    String pat = server.arg("pattern");
+    playBellPattern(pat.c_str());
+    server.send(200, "application/json", "{\"status\":\"ok\",\"pattern\":\"" + pat + "\"}");
+  } else {
+    triggerNoticeBeep();
+    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Buzzer alert beep triggered\"}");
+  }
+}
+
+void handleBell() {
+  enableCORS();
+  String pat = timetableDefaultPattern;
+  if (server.hasArg("pattern")) {
+    pat = server.arg("pattern");
+  }
+  playBellPattern(pat.c_str());
+  server.send(200, "application/json", "{\"status\":\"ok\",\"pattern\":\"" + pat + "\"}");
+}
+
+void handleTimetableGet() {
+  enableCORS();
+  StaticJsonDocument<4096> doc;
+  doc["enabled"] = timetableEnabled;
+  doc["defaultPattern"] = timetableDefaultPattern;
+
+  JsonArray days = doc.createNestedArray("activeDays");
+  for (int d = 0; d <= 6; d++) {
+    if (timetableActiveDays & (1 << d)) {
+      days.add(d);
+    }
+  }
+
+  JsonArray periods = doc.createNestedArray("periods");
+  for (int i = 0; i < timetablePeriodCount; i++) {
+    JsonObject p = periods.createNestedObject();
+    p["id"] = timetablePeriods[i].id;
+    p["name"] = timetablePeriods[i].name;
+    p["type"] = timetablePeriods[i].type;
+    p["enabled"] = timetablePeriods[i].enabled;
+    p["bellPattern"] = timetablePeriods[i].pattern;
+
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%02d:%02d", timetablePeriods[i].startHour, timetablePeriods[i].startMin);
+    p["startTime"] = buf;
+    snprintf(buf, sizeof(buf), "%02d:%02d", timetablePeriods[i].endHour, timetablePeriods[i].endMin);
+    p["endTime"] = buf;
+  }
+
+  String output;
+  serializeJson(doc, output);
+  server.send(200, "application/json", output);
+}
+
+void handleTimetablePost() {
+  enableCORS();
+  if (server.hasArg("plain")) {
+    String body = server.arg("plain");
+    if (parseTimetableJson(body)) {
+      saveTimetableToNVS(body);
+      server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Timetable saved to NVS\"}");
+      return;
+    }
+  }
+  server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid JSON\"}");
 }
 
 // ==========================================
@@ -1974,6 +2310,7 @@ void setup() {
   rated_corr1 = preferences.getFloat("r_cr1", WATTS_CORR_LIGHT);
   rated_corr2 = preferences.getFloat("r_cr2", WATTS_CORR_LIGHT);
   loadNoticesFromNVS(); // Immediately restore notices onto Notice OLED on boot
+  loadTimetableFromNVS(); // Restore timetable schedule from NVS flash memory
   cloud_prev_system_auto = isAutoMode;
   Serial.printf("[SYSTEM] Boot System Mode: %s | Restored Energy: C1=%.4f kWh, "
                 "C2=%.4f kWh\n",
@@ -2173,6 +2510,11 @@ void setup() {
   server.on("/api/time", HTTP_ANY, handleTimeSync);
   server.on("/api/buzzer", HTTP_ANY, handleBuzzerTest);
   server.on("/api/buzzer", HTTP_OPTIONS, handleOptions);
+  server.on("/api/bell", HTTP_ANY, handleBell);
+  server.on("/api/bell", HTTP_OPTIONS, handleOptions);
+  server.on("/api/timetable", HTTP_GET, handleTimetableGet);
+  server.on("/api/timetable", HTTP_POST, handleTimetablePost);
+  server.on("/api/timetable", HTTP_OPTIONS, handleOptions);
 
   server.onNotFound(handleNotFound); // Captive portal redirect & CORS preflight
   server.begin();
@@ -2799,8 +3141,9 @@ void loop() {
   // 1b. Process incoming HTTP client requests
   server.handleClient();
 
-  // 1c. Non-blocking Audio Alert Buzzer
+  // 1c. Non-blocking Audio Alert Buzzer & Timetable Period Bell
   handleBuzzer();
+  checkTimetableBell();
 
   // 1d. Wi-Fi Disconnect Watchdog:
   // If Wi-Fi was connected but drops while running, wait WIFI_CONNECT_TIMEOUT_SEC then launch Hotspot
@@ -2944,6 +3287,30 @@ void loop() {
             eligibleIndices[eligibleCount++] = i;
           }
         }
+      }
+
+      // Priority 0: Period Over Alert Popup (10s duration)
+      if (now < periodOverAlertUntilMs) {
+        display.fillRect(0, 0, 128, 14, SSD1306_WHITE);
+        display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+        display.setTextSize(1);
+        display.setCursor(10, 3);
+        display.print(F("*** PERIOD OVER ***"));
+
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0, 20);
+        display.print(F("Ended:"));
+        display.setCursor(0, 32);
+        String pName = String(lastBellRungPeriodName);
+        if (pName.length() > 21) pName = pName.substring(0, 18) + "...";
+        display.print(pName);
+
+        display.drawLine(0, 46, 128, 46, SSD1306_WHITE);
+        display.setCursor(0, 52);
+        display.printf("Time: %02d:%02d [BELL RUNG]", lastBellRungHour, lastBellRungMin);
+        display.display();
+        lastDisplayUpdate = now;
+        return;
       }
 
       // Priority 1: High-Priority Breaking Notice Popup (15s after receipt)
