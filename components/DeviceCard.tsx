@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Switch } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Switch, Platform } from 'react-native';
 import { Device } from '../types';
 import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
@@ -24,6 +24,19 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
     'cls-corridor'
   );
 
+  const navigateToDetails = () => {
+    router.push({ 
+      pathname: '/device/[id]', 
+      params: { id: device.id, classroomId: targetClassroomId } 
+    });
+  };
+
+  const handleTilePress = () => {
+    if (!isOffline) {
+      onToggle();
+    }
+  };
+
   const getIcon = () => {
     switch (device.category) {
       case 'light': return 'bulb';
@@ -47,8 +60,10 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
         isOn && !isOffline && styles.cardActive,
         isOffline && styles.cardOffline
       ]}
-      activeOpacity={0.7}
-      onPress={() => router.push({ pathname: '/device/[id]', params: { id: device.id, classroomId: targetClassroomId } })}
+      activeOpacity={0.75}
+      onPress={handleTilePress}
+      onLongPress={navigateToDetails}
+      delayLongPress={350}
     >
       <View style={styles.header}>
         <View style={[
@@ -62,34 +77,50 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
             color={isOffline ? Colors.textMuted : isOn ? Colors.primary : Colors.text} 
           />
         </View>
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={(e) => {
-            e.stopPropagation();
-            if (!isOffline) onToggle();
-          }}
-          style={styles.switchWrapper}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
+
+        <View style={styles.switchWrapper}>
           <Switch
             value={isOn}
-            onValueChange={onToggle}
+            onValueChange={handleTilePress}
             disabled={isOffline}
-            trackColor={{ false: Colors.surfaceTranslucent, true: Colors.primary }}
-            thumbColor={isOn ? '#FFF' : Colors.textMuted}
-            style={{ transform: [{ scale: 0.85 }] }}
+            trackColor={{ false: 'rgba(255, 255, 255, 0.15)', true: Colors.primary }}
+            thumbColor={isOn ? '#FFFFFF' : '#D1D5DB'}
+            style={{ 
+              transform: [{ scale: Platform.OS === 'ios' ? 0.95 : 1.15 }] 
+            }}
             pointerEvents="none"
           />
-        </TouchableOpacity>
+        </View>
       </View>
 
-      <View style={styles.info}>
-        <Text style={[styles.name, isOffline && styles.textOffline]} numberOfLines={1}>
-          {device.name}
-        </Text>
-        <Text style={styles.status}>
-          {getStatusText()}
-        </Text>
+      <View style={styles.footer}>
+        <View style={styles.info}>
+          <Text style={[styles.name, isOffline && styles.textOffline]} numberOfLines={1}>
+            {device.name}
+          </Text>
+          <Text style={styles.status}>
+            {getStatusText()}
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={[
+            styles.settingsButton,
+            isOn && !isOffline && styles.settingsButtonActive
+          ]}
+          onPress={(e) => {
+            e.stopPropagation?.();
+            navigateToDetails();
+          }}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityLabel="Device Details"
+        >
+          <Ionicons 
+            name="settings-outline" 
+            size={14} 
+            color={isOn && !isOffline ? Colors.primary : Colors.textMuted} 
+          />
+        </TouchableOpacity>
       </View>
     </TouchableOpacity>
   );
@@ -106,34 +137,41 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   cardActive: {
-    borderColor: Colors.primary,
-    backgroundColor: 'rgba(253, 168, 58, 0.05)',
+    borderColor: 'rgba(253, 168, 58, 0.45)',
+    backgroundColor: 'rgba(253, 168, 58, 0.08)',
   },
   cardOffline: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 16,
   },
   iconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: Colors.surfaceTranslucent,
     justifyContent: 'center',
     alignItems: 'center',
   },
   iconContainerActive: {
-    backgroundColor: 'rgba(253, 168, 58, 0.15)',
+    backgroundColor: 'rgba(253, 168, 58, 0.18)',
   },
   iconContainerOffline: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+  },
   info: {
-    gap: 4,
+    flex: 1,
+    marginRight: 6,
+    gap: 3,
   },
   name: {
     color: Colors.text,
@@ -150,5 +188,20 @@ const styles = StyleSheet.create({
   switchWrapper: {
     justifyContent: 'center',
     alignItems: 'center',
+    paddingRight: 2,
+  },
+  settingsButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  settingsButtonActive: {
+    backgroundColor: 'rgba(253, 168, 58, 0.12)',
+    borderColor: 'rgba(253, 168, 58, 0.3)',
   },
 });
