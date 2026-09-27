@@ -105,27 +105,79 @@ The system employs a **Hybrid Dual-Path** networking approach to balance instant
 
 ### 4. ESP32 Firmware Architecture
 
-#### Pin Mapping & Hardware Specs
+#### Master Pin Mapping & Hardware Specs
 
-| Peripheral / Component | ESP32 GPIO | Pin Type | Notes |
-| :--- | :--- | :--- | :--- |
-| **OLED SDA** | GPIO 21 | I2C Data | SSD1306 128x64 display |
-| **OLED SCL** | GPIO 22 | I2C Clock | SSD1306 128x64 display |
-| **DHT11 / DHT22 Data** | GPIO 4 | Digital In/Out | 2.5s non-blocking interval |
-| **PIR 1 (Classroom A101)** | GPIO 32 | Digital Input | ADC1 safe, hardware debounce |
-| **PIR 2 (Classroom A102)** | GPIO 33 | Digital Input | ADC1 safe, hardware debounce |
-| **LDR 1 (Corridor 1)** | GPIO 34 | Analog In (ADC1) | Wi-Fi safe input |
-| **LDR 2 (Corridor 2)** | GPIO 35 | Analog In (ADC1) | Wi-Fi safe input |
-| **ACS712 Current Sensor** | GPIO 36 (SENSOR_VP) | Analog In (ADC1) | Dedicated A101 AC current |
-| **ZMPT101B Voltage Sensor** | GPIO 39 (SENSOR_VN) | Analog In (ADC1) | Dedicated A101 AC voltage |
-| **Servo 1 (A101 Curtains)**| GPIO 18 | PWM Output | 0° closed, 80° open |
-| **Servo 2 (A102 Curtains)**| GPIO 19 | PWM Output | 0° closed, 80° open |
-| **Relay 1 (A101 Light)** | GPIO 25 | Digital Output | Active-LOW, staggered startup |
-| **Relay 2 (A101 Fan)** | GPIO 27 | Digital Output | Active-LOW, staggered startup |
-| **Relay 3 (A102 Light)** | GPIO 26 | Digital Output | Active-LOW, staggered startup |
-| **Relay 4 (A102 Fan)** | GPIO 14 | Digital Output | Active-LOW, staggered startup |
-| **Relay 5 (Corridor 1 Light)**| GPIO 16 | Digital Output | Active-LOW, staggered startup |
-| **Relay 6 (Corridor 2 Light)**| GPIO 17 | Digital Output | Active-LOW, staggered startup |
+| Peripheral / Component | ESP32 GPIO | Direction / Mode | Power Rail | Notes / Function |
+| :--- | :--- | :--- | :--- | :--- |
+| **Telemetry OLED (SDA)** | **GPIO 21** | I2C Data (`Wire`) | 3.3V | SSD1306 Display 1: System, Wi-Fi & AC Power |
+| **Telemetry OLED (SCL)** | **GPIO 22** | I2C Clock (`Wire`) | 3.3V | SSD1306 Display 1: System, Wi-Fi & AC Power |
+| **Notice Board OLED (SDA)** | **GPIO 13** | I2C Data (`Wire1`) | 3.3V | SSD1306 Display 2: Campus Notice Board & Clock |
+| **Notice Board OLED (SCL)** | **GPIO 15** | I2C Clock (`Wire1`) | 3.3V | SSD1306 Display 2: Campus Notice Board & Clock |
+| **3V Audio Alert Buzzer** | **GPIO 23** | Output (Digital/PWM)| 3.3V | Notice arrival beeps & Timetable Period Bells |
+| **DHT11 / DHT22 Data** | **GPIO 4** | Bidirectional Data | 3.3V | 2.5s non-blocking climate sampling |
+| **PIR 1 (Classroom A101)** | **GPIO 32** | Digital Input | 3.3V / 5V | ADC1 safe, hardware debounced occupancy |
+| **PIR 2 (Classroom A102)** | **GPIO 33** | Digital Input | 3.3V / 5V | ADC1 safe, hardware debounced occupancy |
+| **LDR 1 (Corridor 1)** | **GPIO 34** | Analog In (ADC1_CH6)| 3.3V | Ambient light level (debounced + hysteresis) |
+| **LDR 2 (Corridor 2)** | **GPIO 35** | Analog In (ADC1_CH7)| 3.3V | Ambient light level (debounced + hysteresis) |
+| **ACS712 Current Sensor** | **GPIO 36** | Analog In (SENSOR_VP)| 5V VCC / 3.3V Sig | Dedicated A101 AC current (ADC1_CH0) |
+| **ZMPT101B Voltage Sensor** | **GPIO 39** | Analog In (SENSOR_VN)| 5V VCC / 3.3V Sig | Dedicated A101 AC 230V voltage (ADC1_CH3) |
+| **Servo 1 (A101 Curtains)**| **GPIO 18** | Output (LEDC PWM) | 5V VCC / 3.3V Sig | Motorized blinds / curtain (0° - 80°) |
+| **Servo 2 (A102 Curtains)**| **GPIO 19** | Output (LEDC PWM) | 5V VCC / 3.3V Sig | Motorized blinds / curtain (0° - 80°) |
+| **Relay 1 (A101 Light)** | **GPIO 25** | Digital Output | 5V VCC / 3.3V Sig | Active-LOW, staggered startup |
+| **Relay 2 (A101 Fan)** | **GPIO 27** | Digital Output | 5V VCC / 3.3V Sig | Active-LOW, staggered startup |
+| **Relay 3 (A102 Light)** | **GPIO 26** | Digital Output | 5V VCC / 3.3V Sig | Active-LOW, staggered startup |
+| **Relay 4 (A102 Fan)** | **GPIO 14** | Digital Output | 5V VCC / 3.3V Sig | Active-LOW, staggered startup |
+| **Relay 5 (Corridor 1 Light)**| **GPIO 16** | Digital Output | 5V VCC / 3.3V Sig | Active-LOW, staggered startup |
+| **Relay 6 (Corridor 2 Light)**| **GPIO 17** | Digital Output | 5V VCC / 3.3V Sig | Active-LOW, staggered startup |
+
+#### ESP32 Physical Board Wiring Diagram (uPesy ESP-WROOM-32 DevKit)
+
+```text
+                                  +-----------------------+
+                                  |     [ESP-WROOM-32]    |
+                                  |    uPesy DevKit Pin   |
+                                  +-----------------------+
+                    3.3V Power -- | [3V3]           [GND] | -- Common Ground
+                        Enable -- | [EN]            [G23] | -- 3V Audio Buzzer (+)
+   ACS712 Current (ADC1_CH0) VP -- | [VP/36]         [G22] | -- Telemetry OLED SCL (Wire)
+   ZMPT101B Volts (ADC1_CH3) VN -- | [VN/39]         [TX0] | -- [USB Serial TXD / Free]
+     Corridor 1 LDR (ADC1_CH6) -- | [G34]           [RX0] | -- [USB Serial RXD / Free]
+     Corridor 2 LDR (ADC1_CH7) -- | [G35]           [G21] | -- Telemetry OLED SDA (Wire)
+           A101 PIR Motion In  -- | [G32]           [GND] | -- Common Ground
+           A102 PIR Motion In  -- | [G33]           [G19] | -- A102 Curtain Servo (PWM)
+            Relay 1: A101 Light -- | [G25]           [G18] | -- A101 Curtain Servo (PWM)
+            Relay 3: A102 Light -- | [G26]            [G5] | -- [Reserved / Free]
+              Relay 2: A101 Fan -- | [G27]           [G17] | -- Relay 6: Corridor 2 Light
+              Relay 4: A102 Fan -- | [G14]           [G16] | -- Relay 5: Corridor 1 Light
+              [Unused / Free]   -- | [G12]            [G4] | -- DHT11 / DHT22 Data
+                  Common Ground -- | [GND]            [G0] | -- [Boot Button / Free]
+        Notice OLED SDA (Wire1) -- | [G13]            [G2] | -- [Onboard Blue LED]
+     (Flash SD2 - Do Not Conn)  -- | [SD2]           [G15] | -- Notice OLED SCL (Wire1)
+     (Flash SD3 - Do Not Conn)  -- | [SD3]           [SD1] | -- (Flash SD1 - Do Not Conn)
+     (Flash CMD - Do Not Conn)  -- | [CMD]           [SD0] | -- (Flash SD0 - Do Not Conn)
+           5V External Power In -- | [5V]            [CLK] | -- (Flash CLK - Do Not Conn)
+                                  +-----------------------+
+                                  |       [MicroUSB]      |
+                                  |     [RST]   [BOOT]    |
+                                  +-----------------------+
+```
+
+#### Power Distribution & Wiring Specifications
+
+1. **Dual Independent I2C Busses**:
+   - Both OLEDs operate at the standard factory address `0x3C` without collision:
+     - **Telemetry Display**: Driven via primary hardware I2C bus `Wire` on **GPIO 21 (SDA) / GPIO 22 (SCL)**.
+     - **Campus Notice Board**: Driven via secondary hardware I2C bus `Wire1` on **GPIO 13 (SDA) / GPIO 15 (SCL)**.
+     - Eliminates need for address jumper re-soldering or external I2C multiplexers.
+
+2. **ADC1 Analog Isolation & Wi-Fi Stability**:
+   - All analog measurement pins (**GPIO 34, 35, 36, 39**) are strictly assigned to **ADC1**.
+   - `ADC2` channels are deliberately left unused to prevent crashes or corruption when the ESP32 Wi-Fi modem is active.
+
+3. **Voltage Rail Allocation**:
+   - **5V / VIN Rail**: Powers the 6-channel relay optocoupler VCC, SG90 servo VCC, ACS712 VCC, and ZMPT101B module VCC.
+   - **3.3V Rail**: Powers both SSD1306 OLED displays, DHT11 sensor, LDR pull-up networks, and the 3V audio buzzer.
+   - **Common Ground**: All sensor, relay, and display grounds are bonded to a common ESP32 GND plane.
 
 #### FreeRTOS Dual-Core Task Allocation
 - **Core 0 (Cloud Task):** Runs `supabaseCloudTask` with 16KB dedicated stack. Handles HTTPS TLS handshakes, payload serialization, Supabase polling, and telemetry without causing latency on Core 1.
