@@ -1,16 +1,13 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { Colors } from '../../constants/colors';
 import { Layout } from '../../constants/layout';
 import { HomeHeader } from '../../components/HomeHeader';
 import { EnergyOverviewCard } from '../../components/EnergyOverviewCard';
 import { QuickControls } from '../../components/QuickControls';
-import { Esp32LiveBar } from '../../components/Esp32LiveBar';
 import { ClassroomCard } from '../../components/ClassroomCard';
 import { NoticeBoardCard } from '../../components/NoticeBoardCard';
 import { useApp, useTheme } from '../../context/AppContext';
 import { useRouter } from 'expo-router';
-
 import { Ionicons } from '@expo/vector-icons';
 
 export default function HomeScreen() {
@@ -19,18 +16,6 @@ export default function HomeScreen() {
   const router = useRouter();
 
   const styles = React.useMemo(() => getStyles(colors, isDark), [colors, isDark]);
-
-  // Determine current active period
-  const now = new Date();
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
-  const activePeriod = timetable.enabled
-    ? timetable.periods.find(p => {
-        if (!p.enabled) return false;
-        const [sh, sm] = p.startTime.split(':').map(Number);
-        const [eh, em] = p.endTime.split(':').map(Number);
-        return currentMinutes >= sh * 60 + sm && currentMinutes < eh * 60 + em;
-      })
-    : null;
 
   return (
     <View style={styles.container}>
@@ -41,26 +26,32 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
       >
         <EnergyOverviewCard />
-        
-        <Esp32LiveBar />
 
-        {/* Timetable / Period Bell Quick Banner */}
-        <View style={styles.periodBannerContainer}>
+        {/* Classroom Timetable & Period Bell Automation */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Classroom Timetable & Period Bell</Text>
           <TouchableOpacity 
-            style={styles.periodBanner} 
+            style={styles.timetableCard}
             activeOpacity={0.8}
             onPress={() => router.push('/timetable')}
           >
-            <View style={styles.periodBannerLeft}>
-              <View style={[styles.periodDot, { backgroundColor: activePeriod ? colors.success : colors.primary }]} />
-              <Ionicons name={activePeriod ? "notifications" : "calendar-outline"} size={16} color={activePeriod ? colors.primary : colors.textMuted} />
-              <Text style={styles.periodBannerText} numberOfLines={1}>
-                {activePeriod 
-                  ? `Active: ${activePeriod.name} (${activePeriod.startTime} - ${activePeriod.endTime})` 
-                  : `Period Bell: ${timetable.enabled ? `${timetable.periods.filter(p => p.enabled).length} Periods Active` : 'Disabled'}`}
+            <View style={styles.timetableIconBox}>
+              <Ionicons name="notifications" size={24} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={styles.timetableCardHeader}>
+                <Text style={styles.timetableCardTitle}>Timetable Bell System</Text>
+                <View style={[styles.badge, timetable.enabled ? styles.badgeActive : styles.badgeDisabled]}>
+                  <Text style={[styles.badgeText, timetable.enabled ? styles.badgeTextActive : styles.badgeTextDisabled]}>
+                    {timetable.enabled ? 'ACTIVE' : 'DISABLED'}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.timetableCardSubtitle}>
+                {timetable.periods.filter(p => p.enabled).length} periods • Tone: {timetable.defaultPattern.toUpperCase()}
               </Text>
             </View>
-            <Text style={styles.periodBannerAction}>Timetable →</Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </TouchableOpacity>
         </View>
 
@@ -116,49 +107,71 @@ function getStyles(colors: any, isDark: boolean) {
       color: colors.text,
       fontSize: 18,
       fontWeight: '700',
+      marginBottom: 12,
     },
     seeAll: {
       color: colors.primary,
       fontSize: 14,
       fontWeight: '600',
     },
-    periodBannerContainer: {
-      paddingHorizontal: Layout.spacing.md,
-      marginBottom: 12,
-    },
-    periodBanner: {
+    timetableCard: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.08)' : 'rgba(217, 119, 6, 0.08)',
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
       borderWidth: 1,
-      borderColor: isDark ? 'rgba(253, 168, 58, 0.25)' : 'rgba(217, 119, 6, 0.25)',
-      borderRadius: Layout.radius.md,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      gap: 8,
+      borderColor: colors.surfaceBorder,
+      gap: 14,
     },
-    periodBannerLeft: {
+    timetableIconBox: {
+      width: 46,
+      height: 46,
+      borderRadius: 23,
+      backgroundColor: colors.primarySubtle,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.primarySubtle,
+    },
+    timetableCardHeader: {
       flexDirection: 'row',
       alignItems: 'center',
-      flex: 1,
       gap: 8,
     },
-    periodDot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-    },
-    periodBannerText: {
+    timetableCardTitle: {
       color: colors.text,
-      fontSize: 12,
-      flex: 1,
-      fontWeight: '500',
-    },
-    periodBannerAction: {
-      color: colors.primary,
-      fontSize: 12,
+      fontSize: 15,
       fontWeight: '700',
+    },
+    timetableCardSubtitle: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      marginTop: 3,
+    },
+    badge: {
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+      borderWidth: 1,
+    },
+    badgeActive: {
+      backgroundColor: colors.successSubtle,
+      borderColor: colors.successSubtle,
+    },
+    badgeDisabled: {
+      backgroundColor: isDark ? 'rgba(150, 150, 150, 0.15)' : 'rgba(0, 0, 0, 0.06)',
+      borderColor: isDark ? 'rgba(150, 150, 150, 0.3)' : 'rgba(0, 0, 0, 0.1)',
+    },
+    badgeText: {
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    badgeTextActive: {
+      color: colors.success,
+    },
+    badgeTextDisabled: {
+      color: colors.textMuted,
     },
   });
 }

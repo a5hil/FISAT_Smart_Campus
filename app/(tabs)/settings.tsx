@@ -17,7 +17,6 @@ export default function SettingsScreen() {
     esp32Connected,
     esp32Telemetry,
     updateEsp32WiFi,
-    timetable,
     colors,
     isDark,
     themeMode,
@@ -143,34 +142,6 @@ export default function SettingsScreen() {
 
         {/* ESP32 Live Controller Management */}
         <Esp32LiveBar />
-
-        {/* Timetable & Period Bell Automation */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Classroom Timetable & Period Bell</Text>
-          <TouchableOpacity 
-            style={styles.timetableCard}
-            activeOpacity={0.8}
-            onPress={() => router.push('/timetable')}
-          >
-            <View style={styles.timetableIconBox}>
-              <Ionicons name="notifications" size={24} color={colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <View style={styles.timetableCardHeader}>
-                <Text style={styles.timetableCardTitle}>Timetable Bell System</Text>
-                <View style={[styles.badge, timetable.enabled ? styles.badgeActive : styles.badgeDisabled]}>
-                  <Text style={[styles.badgeText, timetable.enabled ? styles.badgeTextActive : styles.badgeTextDisabled]}>
-                    {timetable.enabled ? 'ACTIVE' : 'DISABLED'}
-                  </Text>
-                </View>
-              </View>
-              <Text style={styles.timetableCardSubtitle}>
-                {timetable.periods.filter(p => p.enabled).length} periods • Tone: {timetable.defaultPattern.toUpperCase()}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
-        </View>
 
         {/* Hardware & Network Specs */}
         <View style={styles.section}>
@@ -500,65 +471,6 @@ const getStyles = (colors: ThemeColors, isDark: boolean) =>
       color: colors.primary,
       fontSize: 11,
       fontWeight: '700',
-    },
-    timetableCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.card,
-      borderRadius: Layout.radius.lg,
-      padding: 16,
-      borderWidth: 1,
-      borderColor: colors.surfaceBorder,
-      gap: 14,
-    },
-    timetableIconBox: {
-      width: 46,
-      height: 46,
-      borderRadius: 23,
-      backgroundColor: colors.primarySubtle,
-      justifyContent: 'center',
-      alignItems: 'center',
-      borderWidth: 1,
-      borderColor: colors.primarySubtle,
-    },
-    timetableCardHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    timetableCardTitle: {
-      color: colors.text,
-      fontSize: 15,
-      fontWeight: '700',
-    },
-    timetableCardSubtitle: {
-      color: colors.textSecondary,
-      fontSize: 12,
-      marginTop: 3,
-    },
-    badge: {
-      paddingHorizontal: 7,
-      paddingVertical: 2,
-      borderRadius: 6,
-      borderWidth: 1,
-    },
-    badgeActive: {
-      backgroundColor: colors.successSubtle,
-      borderColor: colors.successSubtle,
-    },
-    badgeDisabled: {
-      backgroundColor: isDark ? 'rgba(150, 150, 150, 0.15)' : 'rgba(0, 0, 0, 0.06)',
-      borderColor: isDark ? 'rgba(150, 150, 150, 0.3)' : 'rgba(0, 0, 0, 0.1)',
-    },
-    badgeText: {
-      fontSize: 10,
-      fontWeight: '700',
-    },
-    badgeTextActive: {
-      color: colors.success,
-    },
-    badgeTextDisabled: {
-      color: colors.textMuted,
     },
     modalOverlay: {
       flex: 1,

@@ -233,26 +233,6 @@ export function NoticeModal({
                 <Text style={styles.durationPillSub}>Persistent</Text>
               </TouchableOpacity>
             </View>
-
-            {/* Classroom Screen Live Preview */}
-            <Text style={[styles.inputLabel, { marginTop: 16 }]}>Classroom Screen Live Preview</Text>
-            <View style={styles.oledPreviewBox}>
-              <View style={styles.oledBezel}>
-                <View style={styles.oledHeaderRow}>
-                  <Text style={styles.oledHeaderText}>[1/1] NOTICE</Text>
-                </View>
-                <View style={styles.oledDivider} />
-                <Text style={styles.oledTitle} numberOfLines={1}>
-                  &gt; {title || 'Notice Title Preview'}
-                </Text>
-                <Text style={styles.oledBody} numberOfLines={4}>
-                  {message || 'Your announcement message will render word-wrapped with smooth vertical scrolling.'}
-                </Text>
-              </View>
-              <Text style={styles.oledFootnote}>
-                20-second rotation cycle • Auto-scrolls and repeats for longer messages
-              </Text>
-            </View>
           </ScrollView>
 
           {/* Action Buttons */}
@@ -432,60 +412,6 @@ function getStyles(colors: any, isDark: boolean) {
     durationPillSub: {
       color: colors.textMuted,
       fontSize: 10,
-    },
-    oledPreviewBox: {
-      backgroundColor: '#050705',
-      borderRadius: 14,
-      padding: 12,
-      borderWidth: 1,
-      borderColor: 'rgba(73, 199, 121, 0.25)',
-    },
-    oledBezel: {
-      backgroundColor: '#000000',
-      borderWidth: 1,
-      borderColor: '#333333',
-      borderRadius: 8,
-      padding: 10,
-      minHeight: 110,
-      justifyContent: 'space-between',
-    },
-    oledHeaderRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    oledHeaderText: {
-      color: '#38EF7D',
-      fontSize: 11,
-      fontWeight: '700',
-      fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-      letterSpacing: 0.5,
-    },
-    oledDivider: {
-      height: 1,
-      backgroundColor: '#38EF7D',
-      marginVertical: 4,
-      opacity: 0.6,
-    },
-    oledTitle: {
-      color: '#FFFFFF',
-      fontSize: 12,
-      fontWeight: 'bold',
-      fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-      marginBottom: 4,
-    },
-    oledBody: {
-      color: '#D4E2D4',
-      fontSize: 11,
-      lineHeight: 15,
-      fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    },
-    oledFootnote: {
-      color: colors.textMuted,
-      fontSize: 10,
-      textAlign: 'center',
-      marginTop: 8,
-      fontStyle: 'italic',
     },
     modalFooter: {
       flexDirection: 'row',
