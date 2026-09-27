@@ -66,6 +66,16 @@ export function NoticeBoardCard({
   const activeNotice: NoticeItem | undefined = filteredNotices[currentIndex];
 
   const handleDelete = (id: string, title: string) => {
+    if (Platform.OS === 'web') {
+      const confirmed = typeof window !== 'undefined'
+        ? window.confirm(`Are you sure you want to remove "${title}" from the digital notice board?`)
+        : true;
+      if (confirmed) {
+        void deleteNotice(id);
+      }
+      return;
+    }
+
     RNAlert.alert(
       'Delete Announcement',
       `Are you sure you want to remove "${title}" from the digital notice board?`,
@@ -74,7 +84,9 @@ export function NoticeBoardCard({
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => deleteNotice(id),
+          onPress: () => {
+            void deleteNotice(id);
+          },
         },
       ]
     );
@@ -143,11 +155,7 @@ export function NoticeBoardCard({
 
       {/* Content Area - FIXED HEIGHT CONTAINER */}
       {filteredNotices.length > 0 && activeNotice ? (
-        <TouchableOpacity
-          style={styles.activeNoticeCard}
-          activeOpacity={0.85}
-          onPress={() => router.push('/announcements')}
-        >
+        <View style={styles.activeNoticeCard}>
           {/* Top metadata row */}
           <View style={styles.noticeMetaRow}>
             <View style={styles.scopeBadge}>
@@ -176,22 +184,27 @@ export function NoticeBoardCard({
               <TouchableOpacity
                 style={styles.deleteButton}
                 onPress={() => handleDelete(activeNotice.id, activeNotice.title)}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                activeOpacity={0.6}
               >
                 <Ionicons name="trash-outline" size={15} color={Colors.critical} />
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* Title and Message: Truncated text CSS */}
-          <View style={styles.textContainer}>
+          {/* Title and Message: Clickable to view details */}
+          <TouchableOpacity
+            style={styles.textContainer}
+            activeOpacity={0.85}
+            onPress={() => router.push('/announcements')}
+          >
             <Text style={styles.noticeTitle} numberOfLines={1} ellipsizeMode="tail">
               {activeNotice.title}
             </Text>
             <Text style={styles.noticeMessage} numberOfLines={2} ellipsizeMode="tail">
               {activeNotice.message}
             </Text>
-          </View>
+          </TouchableOpacity>
 
           {/* Carousel footer & pagination */}
           <View style={styles.carouselFooter}>
@@ -224,7 +237,7 @@ export function NoticeBoardCard({
               </View>
             )}
           </View>
-        </TouchableOpacity>
+        </View>
       ) : (
         <View style={styles.emptyContainer}>
           <Ionicons name="notifications-off-outline" size={24} color={Colors.textMuted} />

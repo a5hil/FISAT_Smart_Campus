@@ -72,6 +72,7 @@ unsigned long noticeActiveStartTimeMs = 0;
 int lastNoticeShownIndex = -1;
 volatile unsigned long newNoticePopupUntilMs = 0;
 volatile int activeNoticePopupIndex = 0;
+volatile int singleOledNoticeIdx = 0;
 
 DHT dht(DHTPIN, DHTTYPE);
 Servo curtain1;
@@ -1152,6 +1153,7 @@ void addOrUpdateNotice(String id, String clsId, String title, String msg, String
     activeNoticePopupIndex = targetIdx;
   }
   currentNoticeDisplayIndex = targetIdx;
+  singleOledNoticeIdx = targetIdx;
   if (saveNvs) saveNoticesToNVS();
   Serial.printf("[NOTICE] Added notice '%s' (Target: %s, Duration: %s, Total: %d)\n",
                 title.c_str(), clsId.c_str(), duration.c_str(), noticeCount);
@@ -1313,6 +1315,12 @@ void updateNoticeBoardDisplay() {
   if (isClockSlideActive) {
     if (now - clockSlideStartMs >= CLOCK_DISPLAY_DURATION_MS) {
       isClockSlideActive = false;
+      // Clock slide completed: advance to the next notice so users see fresh content
+      if (noticeCount > 1) {
+        currentNoticeDisplayIndex = (currentNoticeDisplayIndex + 1) % noticeCount;
+      }
+      lastNoticeShownIndex = currentNoticeDisplayIndex;
+      noticeActiveStartTimeMs = now;
     } else {
       static unsigned long lastClockDrawMs = 0;
       if (now - lastClockDrawMs < 200) return;
@@ -1489,7 +1497,6 @@ void updateNoticeBoardDisplay() {
     if (eligibleCount > 1) {
       currentNoticeDisplayIndex = (currentNoticeDisplayIndex + 1) % eligibleCount;
       lastNoticeShownIndex = currentNoticeDisplayIndex;
-      return;
     }
   }
 
@@ -1605,8 +1612,7 @@ void handleNoticesSync() {
     StaticJsonDocument<4096> doc;
     DeserializationError err = deserializeJson(doc, server.arg("plain"));
     if (!err && doc.is<JsonArray>()) {
-      noticeCount = 0; // Completely replace with incoming active array!
-      currentNoticeDisplayIndex = 0;
+      noticeCount = 0; // Replace with incoming active array
       newNoticePopupUntilMs = 0;
       for (JsonObject obj : doc.as<JsonArray>()) {
         const char* id = obj["id"];
@@ -1631,6 +1637,12 @@ void handleNoticesSync() {
           notices[noticeCount].active = true;
           noticeCount++;
         }
+      }
+      if (currentNoticeDisplayIndex >= noticeCount) {
+        currentNoticeDisplayIndex = 0;
+      }
+      if (singleOledNoticeIdx >= noticeCount) {
+        singleOledNoticeIdx = 0;
       }
       saveNoticesToNVS();
       Serial.printf("[NOTICE SYNC] Active notices synchronized (%d active).\n", noticeCount);
@@ -2419,7 +2431,16 @@ void reconcileNoticesFromCloud(JsonArray cloudNotices) {
       if (durStr == "1h") updated[updatedCount].durationMs = 3600000UL;
       else if (durStr == "24h" || durStr == "1d") updated[updatedCount].durationMs = 86400000UL;
       else updated[updatedCount].durationMs = 0;
-      updated[updatedCount].createdAtMs = millis();
+
+      // Preserve existing createdAtMs if notice was already active to allow natural expiration
+      unsigned long origCreatedAt = millis();
+      for (int k = 0; k < noticeCount; k++) {
+        if (notices[k].id == String(aid)) {
+          origCreatedAt = notices[k].createdAtMs;
+          break;
+        }
+      }
+      updated[updatedCount].createdAtMs = origCreatedAt;
       updated[updatedCount].active = true;
       updatedCount++;
     }
@@ -2436,6 +2457,22 @@ void reconcileNoticesFromCloud(JsonArray cloudNotices) {
   }
 
   if (changed) {
+    // Preserve breaking notice popup if the notice still exists
+    bool keepPopup = false;
+    if (newNoticePopupUntilMs > millis() && activeNoticePopupIndex >= 0 && activeNoticePopupIndex < noticeCount) {
+      String popupId = notices[activeNoticePopupIndex].id;
+      for (int i = 0; i < updatedCount; i++) {
+        if (updated[i].id == popupId) {
+          activeNoticePopupIndex = i;
+          keepPopup = true;
+          break;
+        }
+      }
+    }
+    if (!keepPopup) {
+      newNoticePopupUntilMs = 0;
+    }
+
     noticeCount = updatedCount;
     for (int i = 0; i < noticeCount; i++) {
       notices[i] = updated[i];
@@ -2443,7 +2480,9 @@ void reconcileNoticesFromCloud(JsonArray cloudNotices) {
     if (currentNoticeDisplayIndex >= noticeCount) {
       currentNoticeDisplayIndex = 0;
     }
-    newNoticePopupUntilMs = 0;
+    if (singleOledNoticeIdx >= noticeCount) {
+      singleOledNoticeIdx = 0;
+    }
     saveNoticesToNVS();
     Serial.printf("[SUPABASE] Cloud notices reconciled: %d active notices.\n", noticeCount);
   }
@@ -2689,7 +2728,6 @@ void loop() {
       // Priority 2: Periodic Carousel Rotation (10s Telemetry / 8s Notice Card)
       static unsigned long singleOledModeStartMs = 0;
       static int singleOledScreen = 0; // 0: Telemetry, 1: Notice
-      static int singleOledNoticeIdx = 0;
 
       if (singleOledModeStartMs == 0) singleOledModeStartMs = now;
 

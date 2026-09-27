@@ -288,6 +288,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const lastUserToggleRef = useRef<Record<string, number>>({});
   const pendingUserToggleStateRef = useRef<Record<string, DeviceStatus>>({});
   const lastNoticeSyncRef = useRef<number>(0);
+  const noticesRef = useRef<NoticeItem[]>([]);
 
   const setEsp32Ip = useCallback(async (ip: string) => {
     const trimmed = ip.trim();
@@ -355,19 +356,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const notifRows = (notifRes.data as NotificationRow[]) || [];
       const noticeRows = notifRows.filter(r => r.type && r.type.startsWith('notice'));
-      if (noticeRows.length > 0) {
-        const now = Date.now();
-        const validNotices: NoticeItem[] = noticeRows.map(a => {
-          let duration: NoticeDuration = '24h';
-          if (a.type && a.type.startsWith('notice:')) {
-            duration = a.type.split(':')[1] as NoticeDuration;
-          }
-          let expiresAt: string | null = null;
-          const createdMs = new Date(a.created_at).getTime();
-          if (duration === '1h') expiresAt = new Date(createdMs + 3600000).toISOString();
-          else if (duration === '24h') expiresAt = new Date(createdMs + 86400000).toISOString();
+      const now = Date.now();
+      const expiredIds: string[] = [];
+      const validNotices: NoticeItem[] = [];
 
-          return {
+      for (const a of noticeRows) {
+        let duration: NoticeDuration = '24h';
+        if (a.type && a.type.startsWith('notice:')) {
+          duration = a.type.split(':')[1] as NoticeDuration;
+        }
+        let expiresAt: string | null = null;
+        const createdMs = new Date(a.created_at).getTime();
+        if (duration === '1h') expiresAt = new Date(createdMs + 3600000).toISOString();
+        else if (duration === '24h') expiresAt = new Date(createdMs + 86400000).toISOString();
+
+        if (expiresAt && new Date(expiresAt).getTime() <= now) {
+          expiredIds.push(a.id);
+        } else {
+          validNotices.push({
             id: a.id,
             classroomId: a.classroom_id || 'all',
             classroomName: a.classroom_id === 'all'
@@ -379,9 +385,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
             createdAt: a.created_at || new Date().toISOString(),
             expiresAt,
             isActive: true,
-          };
-        }).filter(n => !n.expiresAt || new Date(n.expiresAt).getTime() > now);
-        setNotices(validNotices);
+          });
+        }
+      }
+
+      setNotices(validNotices);
+
+      // Clean up any expired notices from Supabase
+      if (expiredIds.length > 0 && isSupabaseConfigured) {
+        void supabase.from('notifications').delete().in('id', expiredIds);
       }
     } catch (e) {
       console.warn('Could not load notices from Supabase notifications:', e);
@@ -475,6 +487,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [systemMode, isReady]);
 
   useEffect(() => {
+    noticesRef.current = notices;
     if (!isReady) return;
     AsyncStorage.setItem(STORAGE_KEYS.NOTICES, JSON.stringify(notices)).catch(console.error);
   }, [notices, isReady]);
@@ -730,10 +743,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       // Ensure ESP32 notice board is fully synchronized with app active notices
+      const currentNotices = noticesRef.current;
       const espNoticeCount = Number(data.notice_count);
       const shouldSyncNotices = (
-        (!isNaN(espNoticeCount) && espNoticeCount !== notices.length) ||
-        Date.now() - lastNoticeSyncRef.current > 30000
+        currentNotices.length > 0 &&
+        ((!isNaN(espNoticeCount) && espNoticeCount !== currentNotices.length) ||
+         Date.now() - lastNoticeSyncRef.current > 60000)
       );
 
       if (shouldSyncNotices) {
@@ -741,7 +756,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         fetch(`${baseUrl}/api/notices/sync`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(notices.map(n => ({
+          body: JSON.stringify(currentNotices.map(n => ({
             id: n.id,
             classroom_id: n.classroomId,
             title: n.title,
@@ -1470,20 +1485,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 2. Cloud persistence in Supabase
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('notifications').insert([{
+        // Broadcast notices have classroomId === 'all', which is not a foreign key in classrooms table.
+        // In PostgreSQL notifications table, foreign key constraint requires NULL for broadcast notices.
+        const dbClassroomId = (!newNotice.classroomId || newNotice.classroomId === 'all')
+          ? null
+          : newNotice.classroomId;
+
+        const { error } = await supabase.from('notifications').insert([{
           id: newNotice.id,
           type: `notice:${newNotice.duration || '24h'}`,
           title: newNotice.title,
           message: newNotice.message,
-          classroom_id: newNotice.classroomId,
+          classroom_id: dbClassroomId,
           classroom_name: newNotice.classroomName,
           is_read: false,
           created_at: newNotice.createdAt,
         }]);
+
+        if (error) {
+          console.error('[SUPABASE ERROR] Failed to insert notice into notifications table:', error.message, error);
+        } else {
+          console.log('[SUPABASE] Notice successfully inserted into notifications:', newNotice.id);
+        }
       } catch (err) {
         console.error('Failed to sync notice to Supabase:', err);
       }
     }
+
+    // 3. Local AsyncStorage persistence
+    AsyncStorage.setItem(STORAGE_KEYS.NOTICES, JSON.stringify([newNotice, ...notices])).catch(() => {});
 
     return true;
   }, [classrooms, esp32Ip, showToast]);
@@ -1497,7 +1527,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setNotifications(prev => prev.filter(n => n.id !== id));
     showToast('Notice removed from board', 'info');
 
-    // 1. Direct LAN dispatch to all candidate ESP32 IPs
+    // Update local cache
+    AsyncStorage.getItem(STORAGE_KEYS.NOTICES).then(stored => {
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          const updated = parsed.filter((n: NoticeItem) => n.id !== id);
+          AsyncStorage.setItem(STORAGE_KEYS.NOTICES, JSON.stringify(updated)).catch(() => {});
+        } catch {}
+      }
+    }).catch(() => {});
+
+    // 1. Delete from Supabase (Central cloud truth)
+    if (isSupabaseConfigured) {
+      try {
+        const { error } = await supabase.from('notifications').delete().eq('id', id);
+        if (error) {
+          console.error('[SUPABASE ERROR] Failed to delete notice from notifications table:', error.message);
+        } else {
+          console.log('[SUPABASE] Notice successfully deleted:', id);
+        }
+      } catch (err) {
+        console.error('Failed to delete notice from Supabase:', err);
+      }
+    }
+
+    // 2. Direct LAN dispatch to candidate ESP32 IPs
     const candidateIps = new Set<string>();
     if (esp32Ip && esp32Ip.trim()) candidateIps.add(esp32Ip.trim());
     for (const c of classrooms) {
@@ -1518,7 +1573,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         signal: controller.signal,
       }).then(() => clearTimeout(timeoutId)).catch(() => clearTimeout(timeoutId));
 
-      // Also trigger batch sync with remaining notices
       fetch(`${baseUrl}/api/notices/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1531,15 +1585,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }))),
       }).catch(() => {});
     });
-
-    // 2. Delete / deactivate in Supabase
-    if (isSupabaseConfigured) {
-      try {
-        await supabase.from('notifications').delete().eq('id', id);
-      } catch (err) {
-        console.error('Failed to delete notice from Supabase:', err);
-      }
-    }
 
     return true;
   }, [classrooms, esp32Ip, showToast]);

@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert as RNAlert,
+  Platform,
 } from 'react-native';
 import { Colors } from '../../constants/colors';
 import { Layout } from '../../constants/layout';
@@ -32,6 +33,16 @@ export default function AnnouncementsScreen() {
   });
 
   const handleDelete = (id: string, title: string) => {
+    if (Platform.OS === 'web') {
+      const confirmed = typeof window !== 'undefined'
+        ? window.confirm(`Are you sure you want to remove "${title}" from the digital notice board?`)
+        : true;
+      if (confirmed) {
+        void deleteNotice(id);
+      }
+      return;
+    }
+
     RNAlert.alert(
       'Delete Announcement',
       `Are you sure you want to remove "${title}" from the digital notice board?`,
@@ -40,7 +51,9 @@ export default function AnnouncementsScreen() {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => deleteNotice(id),
+          onPress: () => {
+            void deleteNotice(id);
+          },
         },
       ]
     );
