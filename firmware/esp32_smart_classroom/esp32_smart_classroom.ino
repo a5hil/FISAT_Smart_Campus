@@ -201,12 +201,18 @@ bool servo2_attached = false;
 volatile bool state_corr1_light = false;
 volatile bool state_corr2_light = false;
 
+// Display States for Classroom 1 (A101)
+volatile bool state_c1_smart_screen = true;   // Primary OLED (Telemetry Display on Wire)
+volatile bool state_c1_notice_screen = true;  // Secondary OLED (Notice Board on Wire1)
+
 // Cloud State Tracking (Prevents stale DB polls from overriding local sensor
 // actions)
 bool cloud_initialized = false;
 bool cloud_prev_c1_light = false;
 bool cloud_prev_c1_fan = false;
 bool cloud_prev_c1_curtain = false;
+bool cloud_prev_c1_smart_screen = true;
+bool cloud_prev_c1_notice_board = true;
 bool cloud_prev_c2_light = false;
 bool cloud_prev_c2_fan = false;
 bool cloud_prev_c2_curtain = false;
@@ -219,6 +225,34 @@ unsigned long lastLocalModeChange = 0;
 
 // OLED Hardware flag
 bool oledFound = false;
+
+void setSmartScreenPower(bool on) {
+  state_c1_smart_screen = on;
+  if (oledFound) {
+    if (on) {
+      display.ssd1306_command(SSD1306_DISPLAYON);
+    } else {
+      display.clearDisplay();
+      display.display();
+      display.ssd1306_command(SSD1306_DISPLAYOFF);
+    }
+  }
+  Serial.printf("[DISPLAY] Smart Screen (Telemetry) -> %s\n", on ? "ON" : "OFF");
+}
+
+void setNoticeScreenPower(bool on) {
+  state_c1_notice_screen = on;
+  if (noticeOledFound) {
+    if (on) {
+      displayNotice.ssd1306_command(SSD1306_DISPLAYON);
+    } else {
+      displayNotice.clearDisplay();
+      displayNotice.display();
+      displayNotice.ssd1306_command(SSD1306_DISPLAYOFF);
+    }
+  }
+  Serial.printf("[DISPLAY] Notice Board Screen -> %s\n", on ? "ON" : "OFF");
+}
 
 // Dynamic Wi-Fi Provisioning & AP Setup Mode flags
 bool isApSetupMode = false;
@@ -594,6 +628,8 @@ String buildStatusJson(bool includeTelemetry = true) {
   json += "\"fan\":" + String(state_c1_fan ? "true" : "false") + ",";
   json += "\"curtain\":" + String(state_c1_curtain ? "true" : "false") + ",";
   json += "\"curtain_angle\":" + String(current_c1_angle) + ",";
+  json += "\"smart_screen\":" + String(state_c1_smart_screen ? "true" : "false") + ",";
+  json += "\"notice_board\":" + String(state_c1_notice_screen ? "true" : "false") + ",";
   json += "\"load_watts\":" + String(getC1LoadWatts(), 1) + ",";
   json += "\"voltage\":" + String(c1_voltage, 1) + ",";
   json += "\"current\":" + String(c1_current, 2) + ",";
@@ -701,6 +737,12 @@ void applyDeviceControl(String dev, bool st) {
     state_c1_fan = st;
   } else if (dev == "c1" || dev == "curtain1" || dev == "dev-a101-curtain") {
     state_c1_curtain = st;
+  } else if (dev == "nb" || dev == "notice" || dev == "notice_board" ||
+             dev == "dev-a101-notice-board" || dev == "dev-a101-notice") {
+    setNoticeScreenPower(st);
+  } else if (dev == "ss" || dev == "smart" || dev == "smart_screen" ||
+             dev == "dev-a101-smart-screen" || dev == "dev-a101-screen") {
+    setSmartScreenPower(st);
   }
   // Classroom 2 / A102
   else if (dev == "l2" || dev == "light2" || dev == "dev-a102-light" ||
@@ -1352,7 +1394,7 @@ void drawNoticeWordWrap(Adafruit_SSD1306 &disp, const String &text, int startX, 
 }
 
 void updateNoticeBoardDisplay() {
-  if (!noticeOledFound) return;
+  if (!noticeOledFound || !state_c1_notice_screen) return;
   unsigned long now = millis();
 
   cleanExpiredNotices();
@@ -2240,6 +2282,17 @@ void syncWithSupabase() {
               else if (strcmp(id, "dev-corr-light-2") == 0 ||
                        strcmp(id, "dev-corr-light2") == 0)
                 cloud_prev_corr2_light = isOn;
+              else if (strcmp(id, "dev-a101-notice-board") == 0 ||
+                       strcmp(id, "dev-a101-notice") == 0) {
+                cloud_prev_c1_notice_board = isOn;
+                if (!isOn) setNoticeScreenPower(false);
+              }
+              else if (strcmp(id, "dev-a101-smart-screen") == 0 ||
+                       strcmp(id, "dev-a101-smart") == 0 ||
+                       strcmp(id, "dev-a101-screen") == 0) {
+                cloud_prev_c1_smart_screen = isOn;
+                if (!isOn) setSmartScreenPower(false);
+              }
               continue;
             }
 
@@ -2346,6 +2399,24 @@ void syncWithSupabase() {
               else if (strcmp(id, "dev-corr-light-2") == 0 ||
                        strcmp(id, "dev-corr-light2") == 0)
                 cloud_prev_corr2_light = isOn;
+            }
+
+            // Display Controls (Work in both Auto & Manual Mode)
+            if (strcmp(id, "dev-a101-notice-board") == 0 ||
+                strcmp(id, "dev-a101-notice") == 0) {
+              if (isOn != cloud_prev_c1_notice_board) {
+                cloud_prev_c1_notice_board = isOn;
+                setNoticeScreenPower(isOn);
+                Serial.printf("[CLOUD COMMAND] A101 Notice Board -> %s\n", isOn ? "ON" : "OFF");
+              }
+            } else if (strcmp(id, "dev-a101-smart-screen") == 0 ||
+                       strcmp(id, "dev-a101-smart") == 0 ||
+                       strcmp(id, "dev-a101-screen") == 0) {
+              if (isOn != cloud_prev_c1_smart_screen) {
+                cloud_prev_c1_smart_screen = isOn;
+                setSmartScreenPower(isOn);
+                Serial.printf("[CLOUD COMMAND] A101 Smart Screen -> %s\n", isOn ? "ON" : "OFF");
+              }
             }
           }
 
@@ -2752,6 +2823,10 @@ void loop() {
   // 8. OLED Display Refresh (Every 1000ms)
   static unsigned long lastDisplayUpdate = 0;
   if (oledFound && (now - lastDisplayUpdate >= OLED_REFRESH_MS)) {
+    if (!state_c1_smart_screen) {
+      lastDisplayUpdate = now;
+      return;
+    }
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);

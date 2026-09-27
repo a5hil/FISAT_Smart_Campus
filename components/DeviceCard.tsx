@@ -38,10 +38,14 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
   };
 
   const getIcon = () => {
+    if (device.id.includes('notice') || device.name.toLowerCase().includes('notice')) return 'easel-outline';
+    if (device.id.includes('screen') || device.name.toLowerCase().includes('screen')) return 'desktop-outline';
     switch (device.category) {
       case 'light': return 'bulb';
       case 'fan': return 'hardware-chip';
       case 'curtain': return 'apps';
+      case 'smart-board':
+      case 'display': return 'tv-outline';
       default: return 'power';
     }
   };
@@ -49,6 +53,10 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
   const getStatusText = () => {
     if (isOffline) return 'Offline';
     if (isCurtain) return isOn ? 'Open (90°)' : 'Closed';
+    const isDisplay = device.id.includes('notice') || device.id.includes('screen') || device.category === 'smart-board' || device.category === 'display';
+    if (isDisplay) {
+      return isOn ? 'Active • Display ON' : 'Standby • Display OFF';
+    }
     const rating = device.ratedPower || (device.category === 'fan' ? 75 : device.category === 'light' ? 60 : 40);
     return isOn ? `On • ${device.powerUsage || rating}W` : `Off • ${rating}W`;
   };

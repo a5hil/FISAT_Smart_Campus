@@ -7,7 +7,7 @@ import {
   ESP32Telemetry, NoticeItem, NoticeDuration,
 } from '../types';
 import {
-  mockUser, mockCampus, mockClassrooms, mockAlerts, mockNotifications, mockEnergyData,
+  mockUser, mockCampus, mockClassrooms, mockAlerts, mockNotifications, mockEnergyData, devsA101,
 } from '../mock_data/mockData';
 
 interface QuickControls {
@@ -102,6 +102,8 @@ function mapDeviceToEsp32Code(classroomId: string, device: Device): string {
     if (device.category === 'curtain') return 'c2';
   }
   if (isC1) {
+    if (device.id.includes('notice') || device.name.toLowerCase().includes('notice')) return 'nb';
+    if (device.id.includes('screen') || device.name.toLowerCase().includes('screen')) return 'ss';
     if (device.category === 'light') return 'l1';
     if (device.category === 'fan') return 'f1';
     if (device.category === 'curtain') return 'c1';
@@ -226,6 +228,16 @@ function buildClassrooms(
     devicesByClass.set(r.classroom_id, list);
   }
 
+  // Ensure Classroom A101 includes Notice Board and Smart Screen devices
+  const c1Devs = devicesByClass.get('cls-a101') ?? [];
+  const missingA101Devs = devsA101.filter(
+    d => (d.id === 'dev-a101-notice-board' || d.id === 'dev-a101-smart-screen') &&
+         !c1Devs.some(existing => existing.id === d.id)
+  );
+  if (missingA101Devs.length > 0) {
+    devicesByClass.set('cls-a101', [...c1Devs, ...missingA101Devs]);
+  }
+
   const alertsByClass = new Map<string, Alert[]>();
   for (const r of alertRows) {
     if (!r.classroom_id) continue;
@@ -340,6 +352,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const modeDev = (deviceRes.data as DeviceRow[]).find(d => d.id === 'dev-system-mode');
     if (modeDev && (modeDev.status === 'auto' || modeDev.status === 'manual')) {
       setSystemModeState(modeDev.status);
+    }
+
+    // Auto-seed missing display devices into Supabase if needed
+    const missingDevs = devsA101.filter(d => 
+      (d.id === 'dev-a101-notice-board' || d.id === 'dev-a101-smart-screen') &&
+      !(deviceRes.data as DeviceRow[]).some(row => row.id === d.id)
+    );
+    if (missingDevs.length > 0) {
+      for (const md of missingDevs) {
+        void supabase.from('devices').upsert({
+          id: md.id,
+          classroom_id: 'cls-a101',
+          controller_id: md.controllerId,
+          name: md.name,
+          category: md.category,
+          status: md.status,
+          relay_channel: md.relayChannel,
+          room_area: md.roomArea,
+          capabilities: md.capabilities,
+          settings: deviceSettings(md),
+          power_usage: md.powerUsage,
+          energy_today: md.energyToday,
+          last_updated: md.lastUpdated,
+        });
+      }
     }
 
     setClassrooms(buildClassrooms(
@@ -697,6 +734,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           fan: Boolean(data.classroom1?.fan),
           curtain: Boolean(data.classroom1?.curtain),
           curtainAngle: Number(data.classroom1?.curtain_angle) || 0,
+          smartScreen: data.classroom1?.smart_screen !== undefined ? Boolean(data.classroom1.smart_screen) : undefined,
+          noticeBoard: data.classroom1?.notice_board !== undefined ? Boolean(data.classroom1.notice_board) : undefined,
           loadWatts: Number(data.classroom1?.load_watts) || 0,
           voltage: data.classroom1?.voltage !== undefined ? Number(data.classroom1.voltage) : 0,
           current: data.classroom1?.current !== undefined ? Number(data.classroom1.current) : 0,
@@ -812,6 +851,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
             if (dev.category === 'curtain') {
               const cRated = dev.ratedPower || 5;
               const res = resolveDeviceStatus({ ...dev, ratedPower: cRated }, telemetry.c1.curtain);
+              return { ...dev, ...res };
+            }
+            if ((dev.id.includes('notice') || dev.name.toLowerCase().includes('notice')) && telemetry.c1.noticeBoard !== undefined) {
+              const res = resolveDeviceStatus(dev, telemetry.c1.noticeBoard);
+              return { ...dev, ...res };
+            }
+            if ((dev.id.includes('screen') || dev.name.toLowerCase().includes('screen')) && telemetry.c1.smartScreen !== undefined) {
+              const res = resolveDeviceStatus(dev, telemetry.c1.smartScreen);
               return { ...dev, ...res };
             }
             return dev;

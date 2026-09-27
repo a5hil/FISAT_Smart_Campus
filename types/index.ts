@@ -5,6 +5,7 @@ export type DeviceCategory =
   | 'television'
   | 'projector'
   | 'smart-board'
+  | 'display'
   | 'speaker'
   | 'computer'
   | 'cctv'
@@ -166,6 +167,8 @@ export interface ESP32Telemetry {
     voltage?: number;
     current?: number;
     hasPowerMeter?: boolean;
+    smartScreen?: boolean;
+    noticeBoard?: boolean;
     energyToday?: number;
     estimatedCost?: number;
   };

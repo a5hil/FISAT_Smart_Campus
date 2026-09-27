@@ -59,10 +59,12 @@ function makeDev(
 }
 
 // ─── Classroom A101 (Classroom 1) ──────────────────────────────────
-const devsA101: Device[] = [
+export const devsA101: Device[] = [
   makeDev('dev-a101-light-1', 'Main Lights', 'light', 'off', 1, 'Ceiling', 60),
   makeDev('dev-a101-fan-1', 'Ceiling Fan', 'fan', 'off', 2, 'Center', 75),
   makeDev('dev-a101-curtain', 'Motorized Curtains', 'curtain', 'off', 18, 'Windows', 5),
+  makeDev('dev-a101-notice-board', 'Notice Board', 'display', 'on', 13, 'Entrance Wall', 2),
+  makeDev('dev-a101-smart-screen', 'Smart Screen', 'display', 'on', 21, 'Podium Desk', 2),
 ];
 
 // ─── Classroom A102 (Classroom 2) ──────────────────────────────────
