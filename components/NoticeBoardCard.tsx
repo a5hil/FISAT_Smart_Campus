@@ -224,6 +224,7 @@ export function NoticeBoardCard({
                     <TouchableOpacity
                       key={idx}
                       onPress={() => setCurrentIndex(idx)}
+                      hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
                       style={[
                         styles.dot,
                         idx === currentIndex ? styles.dotActive : styles.dotInactive,
@@ -484,7 +485,7 @@ function getStyles(colors: any, isDark: boolean) {
     },
     dotInactive: {
       width: 4,
-      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.15)',
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.28)' : 'rgba(0, 0, 0, 0.28)',
     },
     emptyContainer: {
       height: 146,

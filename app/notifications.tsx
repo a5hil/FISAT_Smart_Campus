@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
 import { ScreenHeader } from '../components/ScreenHeader';
-import { FloatingBottomNav } from '../components/FloatingBottomNav';
 import { useApp, useTheme } from '../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 import { NotificationItem } from '../types';
@@ -83,7 +84,15 @@ function NotificationCard({
           </View>
         )}
       </View>
-      <TouchableOpacity style={styles.dismissBtn} onPress={onDismiss}>
+      <TouchableOpacity 
+        style={styles.dismissBtn} 
+        onPress={(e) => {
+          e.stopPropagation();
+          onDismiss();
+        }}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        activeOpacity={0.6}
+      >
         <Ionicons name="close" size={18} color={colors.textMuted} />
       </TouchableOpacity>
     </TouchableOpacity>
@@ -91,11 +100,33 @@ function NotificationCard({
 }
 
 export default function NotificationsScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { notifications, markNotificationRead, markAllNotificationsRead, deleteNotification, clearAllNotifications } = useApp();
   const { colors, isDark } = useTheme();
 
   const styles = React.useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const unreadCount = notifications.filter(n => !n.isRead).length;
+
+  const handleClearAll = () => {
+    if (notifications.length === 0) return;
+
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Are you sure you want to clear all notifications?')) {
+        clearAllNotifications();
+      }
+      return;
+    }
+
+    Alert.alert(
+      'Clear All Notifications',
+      'Are you sure you want to remove all notifications? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear All', style: 'destructive', onPress: clearAllNotifications },
+      ]
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -110,8 +141,8 @@ export default function NotificationsScreen() {
                   <Text style={styles.markAllRead}>Mark all read</Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity onPress={clearAllNotifications} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Text style={[styles.markAllRead, { color: colors.critical }]}>Clear all</Text>
+              <TouchableOpacity onPress={handleClearAll} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={styles.clearAllTextTop}>Clear all</Text>
               </TouchableOpacity>
             </View>
           ) : undefined
@@ -144,10 +175,24 @@ export default function NotificationsScreen() {
             <Text style={styles.emptySubtitle}>You're all caught up!</Text>
           </View>
         )}
-        <View style={{ height: 100 }} />
+        <View style={{ height: 80 }} />
       </ScrollView>
 
-      <FloatingBottomNav />
+      {/* Circular Close Button in Bottom Center */}
+      <View style={[styles.bottomCenterContainer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+        <TouchableOpacity
+          style={styles.circularCloseBtn}
+          onPress={() => router.back()}
+          activeOpacity={0.8}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons
+            name="close"
+            size={24}
+            color={isDark ? '#000000' : '#FFFFFF'}
+          />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -254,6 +299,33 @@ function getStyles(colors: any, isDark: boolean) {
     emptySubtitle: {
       color: colors.textMuted,
       fontSize: 14,
+    },
+    clearAllTextTop: {
+      color: colors.critical,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    bottomCenterContainer: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+      pointerEvents: 'box-none',
+    },
+    circularCloseBtn: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.25,
+      shadowRadius: 8,
+      elevation: 6,
     },
   });
 }

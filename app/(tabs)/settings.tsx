@@ -85,8 +85,8 @@ export default function SettingsScreen() {
                 </Text>
                 <Text style={styles.themeSubtitle}>
                   {isDark
-                    ? 'Deep obsidian black with high-contrast text'
-                    : 'Clean daylight aesthetic with WCAG AA/AAA compliant contrast'}
+                    ? 'Deep obsidian black'
+                    : 'Clean daylight aesthetic'}
                 </Text>
               </View>
             </View>
@@ -154,7 +154,7 @@ export default function SettingsScreen() {
             </View>
 
             {/* Clickable Wi-Fi Network Row to Configure Wi-Fi */}
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.infoRow}
               activeOpacity={0.7}
               onPress={handleOpenWifiModal}
@@ -258,7 +258,7 @@ export default function SettingsScreen() {
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.eyeBtn}
                   onPress={() => setShowPassword(!showPassword)}
                 >

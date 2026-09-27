@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -112,6 +113,9 @@ export function NoticeModal({
         style={styles.modalOverlay}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        <TouchableWithoutFeedback onPress={onClose}>
+          <View style={styles.backdropDismiss} />
+        </TouchableWithoutFeedback>
         <View style={styles.modalContainer}>
           {/* Header */}
           <View style={styles.modalHeader}>
@@ -268,6 +272,9 @@ function getStyles(colors: any, isDark: boolean) {
       flex: 1,
       backgroundColor: colors.modalOverlay,
       justifyContent: 'flex-end',
+    },
+    backdropDismiss: {
+      flex: 1,
     },
     modalContainer: {
       backgroundColor: colors.card,

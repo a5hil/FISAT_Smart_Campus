@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Switch, Modal, TextInput, Alert as RNAlert, Platform
+  Switch, Modal, TextInput, Alert as RNAlert, Platform,
+  KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
 import { useApp, useTheme } from '../context/AppContext';
@@ -29,6 +31,7 @@ const BELL_PATTERNS: { id: BellPattern; name: string; desc: string; icon: string
 
 export default function TimetableScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { timetable, updateTimetable, triggerBellTest, esp32Connected } = useApp();
   const { colors, isDark } = useTheme();
 
@@ -235,7 +238,7 @@ export default function TimetableScreen() {
   return (
     <View style={styles.container}>
       {/* Screen Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 16) }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
@@ -438,83 +441,92 @@ export default function TimetableScreen() {
       </ScrollView>
 
       {/* Add / Edit Period Modal */}
-      <Modal visible={modalVisible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {editingPeriodId ? 'Edit Period' : 'Add Schedule Period'}
-              </Text>
-              <TouchableOpacity onPress={() => setModalVisible(false)}>
-                <Ionicons name="close" size={22} color={colors.text} />
-              </TouchableOpacity>
-            </View>
+      <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={() => setModalVisible(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalDismissArea}>
+              <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()}>
+                <View style={styles.modalContent}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>
+                      {editingPeriodId ? 'Edit Period' : 'Add Schedule Period'}
+                    </Text>
+                    <TouchableOpacity onPress={() => setModalVisible(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Ionicons name="close" size={22} color={colors.text} />
+                    </TouchableOpacity>
+                  </View>
 
-            <Text style={styles.inputLabel}>Period Title</Text>
-            <TextInput
-              style={styles.textInput}
-              placeholder="e.g. Period 1, Tea Break, Lab Session"
-              placeholderTextColor={colors.inputPlaceholder}
-              value={periodName}
-              onChangeText={setPeriodName}
-            />
+                  <Text style={styles.inputLabel}>Period Title</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="e.g. Period 1, Tea Break, Lab Session"
+                    placeholderTextColor={colors.inputPlaceholder}
+                    value={periodName}
+                    onChangeText={setPeriodName}
+                  />
 
-            <View style={styles.timeInputRow}>
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text style={styles.inputLabel}>Start Time (HH:mm)</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="09:00"
-                  placeholderTextColor={colors.inputPlaceholder}
-                  value={startTime}
-                  onChangeText={setStartTime}
-                  keyboardType="numbers-and-punctuation"
-                />
-              </View>
-              <View style={{ flex: 1, marginLeft: 8 }}>
-                <Text style={styles.inputLabel}>End Time (HH:mm)</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="10:00"
-                  placeholderTextColor={colors.inputPlaceholder}
-                  value={endTime}
-                  onChangeText={setEndTime}
-                  keyboardType="numbers-and-punctuation"
-                />
-              </View>
-            </View>
+                  <View style={styles.timeInputRow}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={styles.inputLabel}>Start Time (HH:mm)</Text>
+                      <TextInput
+                        style={styles.textInput}
+                        placeholder="09:00"
+                        placeholderTextColor={colors.inputPlaceholder}
+                        value={startTime}
+                        onChangeText={setStartTime}
+                        keyboardType="numbers-and-punctuation"
+                      />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 8 }}>
+                      <Text style={styles.inputLabel}>End Time (HH:mm)</Text>
+                      <TextInput
+                        style={styles.textInput}
+                        placeholder="10:00"
+                        placeholderTextColor={colors.inputPlaceholder}
+                        value={endTime}
+                        onChangeText={setEndTime}
+                        keyboardType="numbers-and-punctuation"
+                      />
+                    </View>
+                  </View>
 
-            <Text style={styles.inputLabel}>Period Type</Text>
-            <View style={styles.typeSelectorRow}>
-              {(['class', 'break', 'lunch', 'lab'] as const).map(t => (
-                <TouchableOpacity
-                  key={t}
-                  style={[styles.typePill, periodType === t && styles.typePillActive]}
-                  onPress={() => setPeriodType(t)}
-                >
-                  <Text style={[styles.typePillText, periodType === t && styles.typePillTextActive]}>
-                    {t.toUpperCase()}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+                  <Text style={styles.inputLabel}>Period Type</Text>
+                  <View style={styles.typeSelectorRow}>
+                    {(['class', 'break', 'lunch', 'lab'] as const).map(t => (
+                      <TouchableOpacity
+                        key={t}
+                        style={[styles.typePill, periodType === t && styles.typePillActive]}
+                        onPress={() => setPeriodType(t)}
+                      >
+                        <Text style={[styles.typePillText, periodType === t && styles.typePillTextActive]}>
+                          {t.toUpperCase()}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
 
-            <View style={styles.modalBtnRow}>
-              <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.modalCancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalSaveBtn}
-                onPress={handleSavePeriod}
-              >
-                <Text style={styles.modalSaveBtnText}>Save Period</Text>
-              </TouchableOpacity>
+                  <View style={styles.modalBtnRow}>
+                    <TouchableOpacity
+                      style={styles.modalCancelBtn}
+                      onPress={() => setModalVisible(false)}
+                    >
+                      <Text style={styles.modalCancelBtnText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.modalSaveBtn}
+                      onPress={handleSavePeriod}
+                    >
+                      <Text style={styles.modalSaveBtnText}>Save Period</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
             </View>
-          </View>
-        </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -530,7 +542,7 @@ function getStyles(colors: any, isDark: boolean) {
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: Layout.spacing.md,
-      paddingTop: Platform.OS === 'ios' ? 54 : 44,
+      paddingTop: 16,
       paddingBottom: 16,
       borderBottomWidth: 1,
       borderBottomColor: colors.surfaceBorder,
@@ -850,6 +862,12 @@ function getStyles(colors: any, isDark: boolean) {
       justifyContent: 'center',
       alignItems: 'center',
       padding: 20,
+    },
+    modalDismissArea: {
+      width: '100%',
+      maxWidth: 440,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     modalContent: {
       width: '100%',
