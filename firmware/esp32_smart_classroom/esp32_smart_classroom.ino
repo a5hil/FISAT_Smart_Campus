@@ -2956,7 +2956,9 @@ void syncWithSupabase() {
       }
     } else {
       // Slot 4: Cloud Digital Notice Board Announcements
-      String urlAnn = String(SUPABASE_URL) + "/rest/v1/notifications?type=like.notice*&order=created_at.desc&limit=8";
+      // Try dedicated announcements table first, fallback to legacy notifications table
+      String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?is_active=eq.true&order=created_at.desc&limit=8";
+      bool fetched = false;
       if (https.begin(client, urlAnn)) {
         https.addHeader("apikey", SUPABASE_KEY);
         https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
@@ -2969,10 +2971,32 @@ void syncWithSupabase() {
           DeserializationError err = deserializeJson(doc, payload);
           if (!err && doc.is<JsonArray>()) {
             reconcileNoticesFromCloud(doc.as<JsonArray>());
+            fetched = true;
           }
         }
         https.end();
         client.stop();
+      }
+
+      if (!fetched) {
+        String urlFallback = String(SUPABASE_URL) + "/rest/v1/notifications?type=like.notice*&order=created_at.desc&limit=8";
+        if (https.begin(client, urlFallback)) {
+          https.addHeader("apikey", SUPABASE_KEY);
+          https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
+          https.addHeader("Accept", "application/json");
+
+          int code = https.GET();
+          if (code == 200) {
+            String payload = https.getString();
+            StaticJsonDocument<2048> doc;
+            DeserializationError err = deserializeJson(doc, payload);
+            if (!err && doc.is<JsonArray>()) {
+              reconcileNoticesFromCloud(doc.as<JsonArray>());
+            }
+          }
+          https.end();
+          client.stop();
+        }
       }
     }
 
@@ -2991,8 +3015,11 @@ void reconcileNoticesFromCloud(JsonArray cloudNotices) {
     const char* atitle = a["title"];
     const char* amsg = a["message"];
     const char* atype = a["type"];
+    const char* adur = a["duration"];
     String dur = "24h";
-    if (atype && strstr(atype, "notice:") == atype) {
+    if (adur && strlen(adur) > 0) {
+      dur = String(adur);
+    } else if (atype && strstr(atype, "notice:") == atype) {
       dur = String(atype + 7);
     }
     if (aid && atitle && amsg && updatedCount < MAX_FIRMWARE_NOTICES) {
@@ -3090,7 +3117,9 @@ void fetchNoticesFromSupabaseCloud() {
   client.setInsecure();
   client.setTimeout(4000);
   HTTPClient https;
-  String urlAnn = String(SUPABASE_URL) + "/rest/v1/notifications?type=like.notice*&order=created_at.desc&limit=8";
+  // Primary: dedicated announcements table
+  String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?is_active=eq.true&order=created_at.desc&limit=8";
+  bool fetched = false;
   if (https.begin(client, urlAnn)) {
     https.addHeader("apikey", SUPABASE_KEY);
     https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
@@ -3103,10 +3132,33 @@ void fetchNoticesFromSupabaseCloud() {
       DeserializationError err = deserializeJson(doc, payload);
       if (!err && doc.is<JsonArray>()) {
         reconcileNoticesFromCloud(doc.as<JsonArray>());
+        fetched = true;
       }
     }
     https.end();
     client.stop();
+  }
+
+  // Fallback if announcements table hasn't been created yet
+  if (!fetched) {
+    String urlFallback = String(SUPABASE_URL) + "/rest/v1/notifications?type=like.notice*&order=created_at.desc&limit=8";
+    if (https.begin(client, urlFallback)) {
+      https.addHeader("apikey", SUPABASE_KEY);
+      https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
+      https.addHeader("Accept", "application/json");
+
+      int code = https.GET();
+      if (code == 200) {
+        String payload = https.getString();
+        StaticJsonDocument<2048> doc;
+        DeserializationError err = deserializeJson(doc, payload);
+        if (!err && doc.is<JsonArray>()) {
+          reconcileNoticesFromCloud(doc.as<JsonArray>());
+        }
+      }
+      https.end();
+      client.stop();
+    }
   }
 }
 

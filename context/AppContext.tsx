@@ -42,6 +42,7 @@ interface AppContextType {
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   deleteNotification: (id: string) => void;
+  clearAllNotifications: () => void;
   dismissAlert: (id: string) => void;
   updateDeviceValue: (classroomId: string, deviceId: string, updates: Partial<Device>) => void;
   updateDeviceRatedPower: (classroomId: string, deviceId: string, ratedWatts: number) => Promise<void>;
@@ -163,6 +164,17 @@ interface AlertRow {
 interface NotificationRow {
   id: string; type: string; title: string; message: string; classroom_id: string | null;
   classroom_name: string | null; is_read: boolean; created_at: string;
+}
+interface AnnouncementRow {
+  id: string;
+  classroom_id: string;
+  classroom_name?: string | null;
+  title: string;
+  message: string;
+  duration?: string | null;
+  expires_at?: string | null;
+  is_active?: boolean;
+  created_at: string;
 }
 interface ActivityRow { id: string; classroom_id: string | null; action: string; user: string; created_at: string; }
 
@@ -416,29 +428,56 @@ export function AppProvider({ children }: { children: ReactNode }) {
       activityRes.data as ActivityRow[],
     ));
     setAlerts((alertRes.data as AlertRow[]).map(mapAlert));
-    setNotifications((notifRes.data as NotificationRow[]).map(mapNotification));
+    // Decouple notifications: Never include notice board announcements in the notifications feed
+    const rawNotifs = (notifRes.data as NotificationRow[]) || [];
+    setNotifications(rawNotifs.filter(r => !r.type?.startsWith('notice')).map(mapNotification));
     setQuickControls({ allLights: false, allFans: false, allCurtains: false });
 
     try {
-      const notifRows = (notifRes.data as NotificationRow[]) || [];
-      const noticeRows = notifRows.filter(r => r.type && r.type.startsWith('notice'));
+      // 1. Primary: Load Campus Notice Board items from dedicated 'announcements' table
+      const annRes = await supabase
+        .from('announcements')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      let announcementRows: AnnouncementRow[] = [];
+      if (!annRes.error && Array.isArray(annRes.data)) {
+        announcementRows = annRes.data as AnnouncementRow[];
+      } else {
+        // Fallback: If 'announcements' table hasn't been created yet in SQL editor, read legacy notices from notifications
+        const legacyNoticeRows = rawNotifs.filter(r => r.type && r.type.startsWith('notice'));
+        announcementRows = legacyNoticeRows.map(l => {
+          let dur = '24h';
+          if (l.type && l.type.includes(':')) dur = l.type.split(':')[1];
+          return {
+            id: l.id,
+            classroom_id: l.classroom_id || 'all',
+            classroom_name: l.classroom_name,
+            title: l.title,
+            message: l.message,
+            duration: dur,
+            is_active: true,
+            created_at: l.created_at,
+          };
+        });
+      }
+
       const now = Date.now();
       const expiredIds: string[] = [];
       const validNotices: NoticeItem[] = [];
 
-      for (const a of noticeRows) {
-        let duration: NoticeDuration = '24h';
-        if (a.type && a.type.startsWith('notice:')) {
-          duration = a.type.split(':')[1] as NoticeDuration;
-        }
-        let expiresAt: string | null = null;
+      for (const a of announcementRows) {
+        let duration: NoticeDuration = (a.duration as NoticeDuration) || '24h';
+        let expiresAt: string | null = a.expires_at || null;
         const createdMs = new Date(a.created_at).getTime();
-        if (duration === '1h') expiresAt = new Date(createdMs + 3600000).toISOString();
-        else if (duration === '24h') expiresAt = new Date(createdMs + 86400000).toISOString();
+        if (!expiresAt) {
+          if (duration === '1h') expiresAt = new Date(createdMs + 3600000).toISOString();
+          else if (duration === '24h') expiresAt = new Date(createdMs + 86400000).toISOString();
+        }
 
         if (expiresAt && new Date(expiresAt).getTime() <= now) {
           expiredIds.push(a.id);
-        } else {
+        } else if (a.is_active !== false) {
           validNotices.push({
             id: a.id,
             classroomId: a.classroom_id || 'all',
@@ -457,12 +496,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       setNotices(validNotices);
 
-      // Clean up any expired notices from Supabase
+      // Clean up any expired notices from cloud
       if (expiredIds.length > 0 && isSupabaseConfigured) {
+        void supabase.from('announcements').delete().in('id', expiredIds);
         void supabase.from('notifications').delete().in('id', expiredIds);
       }
     } catch (e) {
-      console.warn('Could not load notices from Supabase notifications:', e);
+      console.warn('Could not load announcements from Supabase:', e);
     }
 
     return true;
@@ -685,34 +725,55 @@ export function AppProvider({ children }: { children: ReactNode }) {
               .select('*')
               .order('created_at', { ascending: false });
             if (data) {
-              setNotifications(data.map(mapNotification));
-              const now = Date.now();
-              const noticeRows = data.filter((a: any) => a.type && a.type.startsWith('notice'));
-              setNotices(noticeRows.map((a: any) => {
-                let duration: NoticeDuration = '24h';
-                if (a.type && a.type.startsWith('notice:')) {
-                  duration = a.type.split(':')[1] as NoticeDuration;
-                }
-                let expiresAt: string | null = null;
-                const createdMs = new Date(a.created_at).getTime();
-                if (duration === '1h') expiresAt = new Date(createdMs + 3600000).toISOString();
-                else if (duration === '24h') expiresAt = new Date(createdMs + 86400000).toISOString();
-
-                return {
-                  id: a.id,
-                  classroomId: a.classroom_id || 'all',
-                  classroomName: a.classroom_id === 'all' ? 'All Classrooms (Broadcast)' : (a.classroom_name || a.classroom_id),
-                  title: a.title,
-                  message: a.message,
-                  duration,
-                  createdAt: a.created_at || new Date().toISOString(),
-                  expiresAt,
-                  isActive: true,
-                };
-              }).filter((n: NoticeItem) => !n.expiresAt || new Date(n.expiresAt).getTime() > now));
+              // Never include notice announcements in notifications feed
+              setNotifications(data.filter((r: any) => !r.type?.startsWith('notice')).map(mapNotification));
             }
           } catch (e) {
-            console.error('Failed to update notices from Realtime:', e);
+            console.error('Failed to update notifications from Realtime:', e);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'announcements' },
+        async () => {
+          try {
+            const { data } = await supabase
+              .from('announcements')
+              .select('*')
+              .order('created_at', { ascending: false });
+            if (data) {
+              const now = Date.now();
+              const validList: NoticeItem[] = [];
+              for (const a of data as AnnouncementRow[]) {
+                let duration: NoticeDuration = (a.duration as NoticeDuration) || '24h';
+                let expiresAt: string | null = a.expires_at || null;
+                const createdMs = new Date(a.created_at).getTime();
+                if (!expiresAt) {
+                  if (duration === '1h') expiresAt = new Date(createdMs + 3600000).toISOString();
+                  else if (duration === '24h') expiresAt = new Date(createdMs + 86400000).toISOString();
+                }
+
+                if (expiresAt && new Date(expiresAt).getTime() <= now) {
+                  // expired
+                } else if (a.is_active !== false) {
+                  validList.push({
+                    id: a.id,
+                    classroomId: a.classroom_id || 'all',
+                    classroomName: a.classroom_name || (a.classroom_id === 'all' ? 'All Classrooms (Broadcast)' : a.classroom_id),
+                    title: a.title,
+                    message: a.message,
+                    duration,
+                    createdAt: a.created_at || new Date().toISOString(),
+                    expiresAt,
+                    isActive: true,
+                  });
+                }
+              }
+              setNotices(validList);
+            }
+          } catch (e) {
+            console.error('Failed to update announcements from Realtime:', e);
           }
         }
       )
@@ -1531,7 +1592,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     const newNotice: NoticeItem = {
-      id: `notif-${now}`,
+      id: `annc-${now}`,
       classroomId: item.classroomId,
       classroomName: item.classroomName,
       title: item.title.trim(),
@@ -1542,12 +1603,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isActive: true,
     };
 
-    // Optimistic local state update
+    // Optimistic local state update (ONLY in notices, NEVER in notifications)
     setNotices(prev => [newNotice, ...prev]);
     showToast(
       item.classroomId === 'all'
-        ? 'Broadcast notice published to all classrooms!'
-        : 'Notice posted to classroom OLED board!',
+        ? 'Broadcast announcement published to all classrooms!'
+        : 'Announcement posted to classroom Notice Board!',
       'success'
     );
 
@@ -1573,33 +1634,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch {}
     }
 
-    // 2. Cloud persistence in Supabase
+    // 2. Cloud persistence in dedicated Supabase 'announcements' table
     if (isSupabaseConfigured) {
       try {
-        // Broadcast notices have classroomId === 'all', which is not a foreign key in classrooms table.
-        // In PostgreSQL notifications table, foreign key constraint requires NULL for broadcast notices.
-        const dbClassroomId = (!newNotice.classroomId || newNotice.classroomId === 'all')
-          ? null
-          : newNotice.classroomId;
-
-        const { error } = await supabase.from('notifications').insert([{
+        const { error: annError } = await supabase.from('announcements').insert([{
           id: newNotice.id,
-          type: `notice:${newNotice.duration || '24h'}`,
+          classroom_id: newNotice.classroomId || 'all',
+          classroom_name: newNotice.classroomName,
           title: newNotice.title,
           message: newNotice.message,
-          classroom_id: dbClassroomId,
-          classroom_name: newNotice.classroomName,
-          is_read: false,
+          duration: newNotice.duration || '24h',
+          expires_at: expiresAt,
+          is_active: true,
           created_at: newNotice.createdAt,
         }]);
 
-        if (error) {
-          console.error('[SUPABASE ERROR] Failed to insert notice into notifications table:', error.message, error);
+        if (annError) {
+          console.warn('[SUPABASE] Could not insert into announcements table:', annError.message);
+          // Fallback if announcements table hasn't been created yet in SQL editor
+          if (annError.message.includes('announcements')) {
+            const dbClassroomId = (!newNotice.classroomId || newNotice.classroomId === 'all')
+              ? null
+              : newNotice.classroomId;
+
+            await supabase.from('notifications').insert([{
+              id: newNotice.id,
+              type: `notice:${newNotice.duration || '24h'}`,
+              title: newNotice.title,
+              message: newNotice.message,
+              classroom_id: dbClassroomId,
+              classroom_name: newNotice.classroomName,
+              is_read: false,
+              created_at: newNotice.createdAt,
+            }]);
+          }
         } else {
-          console.log('[SUPABASE] Notice successfully inserted into notifications:', newNotice.id);
+          console.log('[SUPABASE] Announcement successfully saved to announcements table:', newNotice.id);
         }
       } catch (err) {
-        console.error('Failed to sync notice to Supabase:', err);
+        console.error('Failed to sync announcement to Supabase:', err);
       }
     }
 
@@ -1615,8 +1688,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       remainingNotices = prev.filter(n => n.id !== id);
       return remainingNotices;
     });
-    setNotifications(prev => prev.filter(n => n.id !== id));
-    showToast('Notice removed from board', 'info');
+    // Decoupled: Deleting a Notice Board announcement NEVER deletes app notifications
+    showToast('Announcement removed from board', 'info');
 
     // Update local cache
     AsyncStorage.getItem(STORAGE_KEYS.NOTICES).then(stored => {
@@ -1629,17 +1702,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }).catch(() => {});
 
-    // 1. Delete from Supabase (Central cloud truth)
+    // 1. Delete from Supabase announcements table
     if (isSupabaseConfigured) {
       try {
-        const { error } = await supabase.from('notifications').delete().eq('id', id);
+        const { error } = await supabase.from('announcements').delete().eq('id', id);
         if (error) {
-          console.error('[SUPABASE ERROR] Failed to delete notice from notifications table:', error.message);
-        } else {
-          console.log('[SUPABASE] Notice successfully deleted:', id);
+          console.warn('[SUPABASE] Delete from announcements:', error.message);
         }
+        // Also cleanup legacy record in notifications if one existed
+        void supabase.from('notifications').delete().eq('id', id);
       } catch (err) {
-        console.error('Failed to delete notice from Supabase:', err);
+        console.error('Failed to delete announcement from Supabase:', err);
       }
     }
 
@@ -1681,22 +1754,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [classrooms, esp32Ip, showToast]);
 
   const deleteNotification = useCallback((id: string) => {
+    // Decoupled: Deleting an app notification NEVER touches or removes Campus Notice Board items!
     setNotifications(prev => prev.filter(n => n.id !== id));
-    setNotices(prev => {
-      const exists = prev.some(n => n.id === id);
-      if (exists) {
-        void deleteNotice(id);
-        return prev.filter(n => n.id !== id);
-      }
-      return prev;
-    });
 
     if (isSupabaseConfigured) {
       void supabase.from('notifications').delete().eq('id', id).then(({ error }) => {
         if (error) console.error('NOTIFICATION DELETE FAILED', error.message);
       });
     }
-  }, [deleteNotice]);
+  }, []);
+
+  const clearAllNotifications = useCallback(() => {
+    // Decoupled: Clearing all notifications clears ONLY system notifications, leaving Notice Board intact!
+    setNotifications([]);
+
+    if (isSupabaseConfigured) {
+      void supabase.from('notifications').delete().not('type', 'like', 'notice%').then(({ error }) => {
+        if (error) console.error('CLEAR ALL NOTIFICATIONS FAILED', error.message);
+      });
+    }
+  }, []);
 
   const dismissAlert = useCallback((id: string) => {
     setAlerts(prev => prev.map(a => a.id === id ? { ...a, isRead: true } : a));
@@ -1817,7 +1894,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       showToast, hideToast,
       toggleDevice, toggleQuickControl, emergencyOff,
       addClassroom, addDevice,
-      markNotificationRead, markAllNotificationsRead, deleteNotification,
+      markNotificationRead, markAllNotificationsRead, deleteNotification, clearAllNotifications,
       dismissAlert, updateDeviceValue, updateDeviceRatedPower,
       esp32Ip, setEsp32Ip, esp32Connected, esp32Telemetry,
       systemMode, setSystemMode,

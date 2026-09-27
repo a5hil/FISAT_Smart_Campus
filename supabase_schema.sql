@@ -124,3 +124,16 @@ CREATE TABLE IF NOT EXISTS public.activity (
   "user" TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Announcements / Campus Digital Notice Board
+CREATE TABLE IF NOT EXISTS public.announcements (
+  id TEXT PRIMARY KEY,
+  classroom_id TEXT NOT NULL DEFAULT 'all',
+  classroom_name TEXT,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  duration TEXT DEFAULT '24h',
+  expires_at TIMESTAMP WITH TIME ZONE,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);

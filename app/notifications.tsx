@@ -91,7 +91,7 @@ function NotificationCard({
 }
 
 export default function NotificationsScreen() {
-  const { notifications, markNotificationRead, markAllNotificationsRead, deleteNotification } = useApp();
+  const { notifications, markNotificationRead, markAllNotificationsRead, deleteNotification, clearAllNotifications } = useApp();
   const { colors, isDark } = useTheme();
 
   const styles = React.useMemo(() => getStyles(colors, isDark), [colors, isDark]);
@@ -103,10 +103,17 @@ export default function NotificationsScreen() {
         title="Notifications" 
         showBack
         rightElement={
-          unreadCount > 0 ? (
-            <TouchableOpacity onPress={markAllNotificationsRead}>
-              <Text style={styles.markAllRead}>Mark all read</Text>
-            </TouchableOpacity>
+          notifications.length > 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+              {unreadCount > 0 && (
+                <TouchableOpacity onPress={markAllNotificationsRead} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text style={styles.markAllRead}>Mark all read</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={clearAllNotifications} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={[styles.markAllRead, { color: colors.critical }]}>Clear all</Text>
+              </TouchableOpacity>
+            </View>
           ) : undefined
         }
       />
