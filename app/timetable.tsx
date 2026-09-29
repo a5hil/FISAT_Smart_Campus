@@ -23,6 +23,7 @@ const DAYS = [
 ];
 
 const BELL_PATTERNS: { id: BellPattern; name: string; desc: string; icon: string }[] = [
+  { id: 'japanese-school-bell', name: 'Japanese School Bell', desc: 'Kin-Kon-Kan-Kon (キーンコーン)', icon: 'school' },
   { id: 'westminster', name: 'Westminster Chime', desc: '8-Note Big Ben Quarters', icon: 'musical-notes' },
   { id: 'college-bell', name: 'College Bell', desc: '3 Ascending Academic Rings', icon: 'notifications' },
   { id: 'triple-chime', name: 'Triple Chime', desc: '3 Gentle Harmonic Notes', icon: 'volume-medium' },
@@ -30,7 +31,7 @@ const BELL_PATTERNS: { id: BellPattern; name: string; desc: string; icon: string
   { id: 'dismissal-chime', name: 'Dismissal Scale', desc: '7-Note End-of-Day Chime', icon: 'walk' },
   { id: 'ding-dong', name: 'Classic Ding-Dong', desc: 'Warm 2-Tone Transition', icon: 'notifications-circle' },
   { id: 'marimba-cascade', name: 'Marimba Cascade', desc: '5-Note Flowing Chime', icon: 'water' },
-  { id: 'st-michael', name: 'St. Michael Chime', desc: 'Cathedral 4-Note Cadence', icon: 'school' },
+  { id: 'st-michael', name: 'St. Michael Chime', desc: 'Cathedral 4-Note Cadence', icon: 'library' },
   { id: 'digital-synth', name: 'Future Synth Chime', desc: '5-Note Rising Arpeggio', icon: 'sparkles' },
   { id: 'morning-reveille', name: 'Morning Fanfare', desc: '5-Note Motivating Assembly', icon: 'sunny' },
   { id: 'gentle-wind', name: 'Gentle Pentatonic', desc: '5-Note Relaxing Breeze', icon: 'leaf' },

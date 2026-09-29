@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { playChimeWebAudio } from '../lib/audioChimes';
 import {
   User, Campus, Classroom, Device, Controller, Alert, NotificationItem, ActivityItem, EnergyReading,
   DeviceCategory, DeviceStatus, DeviceCapability, ClassroomStatus, OccupancyStatus, AlertSeverity, NotificationType,
@@ -1852,6 +1853,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [classrooms, esp32Ip, showToast]);
 
   const triggerBellTest = useCallback(async (pattern: BellPattern = 'college-bell') => {
+    // Play local audio chime preview if available (e.g. web browser / dev preview)
+    const webAudioPlayed = playChimeWebAudio(pattern);
+
     const candidateIps = new Set<string>();
     if (esp32Ip && esp32Ip.trim()) candidateIps.add(esp32Ip.trim());
     for (const c of classrooms) {
@@ -1861,6 +1865,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     if (candidateIps.size === 0) {
+      if (webAudioPlayed) {
+        showToast(`Period Bell (${pattern}) Preview Played`, 'info');
+        return { success: true, message: 'Audio preview played' };
+      }
       return { success: false, message: 'ESP32 Controller offline or IP not configured' };
     }
 
@@ -1885,6 +1893,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (success) {
       showToast(`Period Bell (${pattern}) Chimed!`, 'success');
       return { success: true, message: 'Bell chimed successfully' };
+    }
+    if (webAudioPlayed) {
+      showToast(`Period Bell (${pattern}) Preview Played (ESP32 Offline)`, 'info');
+      return { success: true, message: 'Audio preview played' };
     }
     return { success: false, message: 'Could not reach ESP32 to test bell' };
   }, [classrooms, esp32Ip, showToast]);

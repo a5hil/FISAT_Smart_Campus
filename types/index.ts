@@ -209,6 +209,7 @@ export interface NoticeItem {
 }
 
 export type BellPattern =
+  | 'japanese-school-bell'
   | 'westminster'
   | 'college-bell'
   | 'triple-chime'

@@ -111,7 +111,7 @@ struct BuzzerNote {
   uint16_t durationMs;
 };
 
-#define MAX_CHIME_NOTES 32
+#define MAX_CHIME_NOTES 48
 BuzzerNote chimeNotes[MAX_CHIME_NOTES];
 int chimeNoteCount = 0;
 int chimeNoteIndex = -1;
@@ -191,7 +191,33 @@ void playBellPattern(const char* pattern) {
   String p = String(pattern);
   p.toLowerCase();
 
-  if (p == "westminster") {
+  if (p == "japanese-school-bell" || p == "japanese" || p == "kin-kon-kan-kon") {
+    // Iconic Japanese School Bell Chime (キーンコーンカーンコーン / Kin-Kon-Kan-Kon)
+    // Westminster chime played in F Major with the nostalgic school bell cadence
+    const BuzzerNote melody[] = {
+      // Phrase 1 (Kin - Kon - Kan - Kon)
+      { NOTE_F5, 520 }, { REST, 40 },
+      { NOTE_A5, 520 }, { REST, 40 },
+      { NOTE_G5, 520 }, { REST, 40 },
+      { NOTE_C5, 880 }, { REST, 400 },
+      // Phrase 2
+      { NOTE_F5, 520 }, { REST, 40 },
+      { NOTE_G5, 520 }, { REST, 40 },
+      { NOTE_A5, 520 }, { REST, 40 },
+      { NOTE_F5, 980 }, { REST, 500 },
+      // Phrase 3
+      { NOTE_A5, 520 }, { REST, 40 },
+      { NOTE_F5, 520 }, { REST, 40 },
+      { NOTE_G5, 520 }, { REST, 40 },
+      { NOTE_C5, 880 }, { REST, 400 },
+      // Phrase 4
+      { NOTE_C5, 520 }, { REST, 40 },
+      { NOTE_G5, 520 }, { REST, 40 },
+      { NOTE_A5, 520 }, { REST, 40 },
+      { NOTE_F5, 1200 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else if (p == "westminster") {
     // 8-note Westminster Quarters (Big Ben chime)
     const BuzzerNote melody[] = {
       { NOTE_E5, 320 }, { NOTE_GS5, 320 }, { NOTE_FS5, 320 }, { NOTE_B4, 550 },
@@ -316,7 +342,7 @@ struct TimetablePeriodFirmware {
   int endMin;
   char type[12]; // "class", "break", "lunch", "lab"
   bool enabled;
-  char pattern[20];
+  char pattern[32];
 };
 
 #define MAX_TIMETABLE_PERIODS 12
@@ -324,7 +350,7 @@ TimetablePeriodFirmware timetablePeriods[MAX_TIMETABLE_PERIODS];
 int timetablePeriodCount = 0;
 bool timetableEnabled = true;
 uint8_t timetableActiveDays = 0b00111110; // Bits 1..5 (Mon..Fri)
-char timetableDefaultPattern[24] = "college-bell";
+char timetableDefaultPattern[32] = "college-bell";
 
 int lastBellRungHour = -1;
 int lastBellRungMin = -1;
