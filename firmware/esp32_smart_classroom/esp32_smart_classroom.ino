@@ -80,131 +80,228 @@ Servo curtain2;
 Preferences preferences;
 
 // ==========================================
-// --- 3V BUZZER AUDIO ALERT & PATTERN SEQUENCER ---
+// --- MUSICAL NOTES & PIEZO AUDIO DRIVER ---
 // ==========================================
-#define MAX_BELL_STEPS 16
-struct BuzzerStep {
-  bool soundOn;
-  int durationMs;
+#define NOTE_G4  392
+#define NOTE_A4  440
+#define NOTE_B4  494
+#define NOTE_C5  523
+#define NOTE_CS5 554
+#define NOTE_D5  587
+#define NOTE_DS5 622
+#define NOTE_E5  659
+#define NOTE_F5  698
+#define NOTE_FS5 740
+#define NOTE_G5  784
+#define NOTE_GS5 831
+#define NOTE_A5  880
+#define NOTE_AS5 932
+#define NOTE_B5  988
+#define NOTE_C6  1047
+#define NOTE_D6  1175
+#define NOTE_E6  1319
+#define NOTE_F6  1397
+#define NOTE_G6  1568
+#define NOTE_A6  1760
+#define NOTE_B6  1976
+#define REST     0
+
+struct BuzzerNote {
+  uint16_t freqHz;
+  uint16_t durationMs;
 };
-BuzzerStep buzzerSteps[MAX_BELL_STEPS];
-volatile int buzzerStepCount = 0;
-volatile int buzzerStepIndex = -1;
-volatile unsigned long nextBuzzerStepMs = 0;
 
-void buzzerSoundOn() {
-#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
-#if BUZZER_IS_ACTIVE
-  digitalWrite(BUZZER_PIN, BUZZER_ACTIVE_HIGH ? HIGH : LOW);
-#else
-  tone(BUZZER_PIN, BUZZER_TONE_FREQ);
-#endif
-#endif
+#define MAX_CHIME_NOTES 32
+BuzzerNote chimeNotes[MAX_CHIME_NOTES];
+int chimeNoteCount = 0;
+int chimeNoteIndex = -1;
+unsigned long nextChimeNoteMs = 0;
+
+void setBuzzerFrequency(uint16_t freqHz) {
+  if (freqHz == 0) {
+    #if BUZZER_IS_ACTIVE
+      digitalWrite(BUZZER_PIN, BUZZER_ACTIVE_HIGH ? LOW : HIGH);
+    #else
+      noTone(BUZZER_PIN);
+      digitalWrite(BUZZER_PIN, LOW);
+    #endif
+  } else {
+    #if BUZZER_IS_ACTIVE
+      digitalWrite(BUZZER_PIN, BUZZER_ACTIVE_HIGH ? HIGH : LOW);
+    #else
+      tone(BUZZER_PIN, freqHz);
+    #endif
+  }
 }
 
-void buzzerSoundOff() {
-#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
-#if BUZZER_IS_ACTIVE
-  digitalWrite(BUZZER_PIN, BUZZER_ACTIVE_HIGH ? LOW : HIGH);
-#else
-  noTone(BUZZER_PIN);
-#endif
-#endif
+void silenceBuzzer() {
+  #if BUZZER_IS_ACTIVE
+    digitalWrite(BUZZER_PIN, BUZZER_ACTIVE_HIGH ? LOW : HIGH);
+  #else
+    noTone(BUZZER_PIN);
+    digitalWrite(BUZZER_PIN, LOW);
+  #endif
 }
 
-void playBellPattern(const char* pattern) {
-#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
-  buzzerStepCount = 0;
-  buzzerStepIndex = -1;
-  buzzerSoundOff();
+inline void buzzerSoundOn() {
+  setBuzzerFrequency(BUZZER_TONE_FREQ);
+}
 
-  String p = String(pattern);
-  p.toLowerCase();
+inline void buzzerSoundOff() {
+  silenceBuzzer();
+}
 
-  if (p == "college-bell") {
-    // Academic classic 3 long rings
-    buzzerSteps[0] = { true, 1000 };
-    buzzerSteps[1] = { false, 350 };
-    buzzerSteps[2] = { true, 1000 };
-    buzzerSteps[3] = { false, 350 };
-    buzzerSteps[4] = { true, 1600 };
-    buzzerStepCount = 5;
-  } else if (p == "triple-chime") {
-    // 3 distinct rhythmic chimes
-    buzzerSteps[0] = { true, 300 };
-    buzzerSteps[1] = { false, 150 };
-    buzzerSteps[2] = { true, 300 };
-    buzzerSteps[3] = { false, 150 };
-    buzzerSteps[4] = { true, 500 };
-    buzzerStepCount = 5;
-  } else if (p == "double-beep") {
-    // 2 crisp alert beeps
-    buzzerSteps[0] = { true, 250 };
-    buzzerSteps[1] = { false, 150 };
-    buzzerSteps[2] = { true, 250 };
-    buzzerStepCount = 3;
-  } else if (p == "single-long") {
-    // Sustained 2-second alert bell
-    buzzerSteps[0] = { true, 2000 };
-    buzzerStepCount = 1;
-  } else {
-    // Default fallback: 2 medium beeps
-    buzzerSteps[0] = { true, 400 };
-    buzzerSteps[1] = { false, 200 };
-    buzzerSteps[2] = { true, 600 };
-    buzzerStepCount = 3;
+void queueChimeNotes(const BuzzerNote notes[], int count) {
+  if (count <= 0) return;
+  if (count > MAX_CHIME_NOTES) count = MAX_CHIME_NOTES;
+
+  for (int i = 0; i < count; i++) {
+    chimeNotes[i] = notes[i];
   }
+  chimeNoteCount = count;
+  chimeNoteIndex = 0;
+  setBuzzerFrequency(chimeNotes[0].freqHz);
+  nextChimeNoteMs = millis() + chimeNotes[0].durationMs;
+}
 
-  buzzerStepIndex = 0;
-  if (buzzerSteps[0].soundOn) {
-    buzzerSoundOn();
-  } else {
-    buzzerSoundOff();
-  }
-  nextBuzzerStepMs = millis() + buzzerSteps[0].durationMs;
-  Serial.printf("[BUZZER] Playing bell pattern: '%s' (%d steps)\n", pattern, buzzerStepCount);
-#endif
+void playBootChime() {
+  // Gentle startup arpeggio (C5 -> E5 -> G5 -> C6)
+  const BuzzerNote melody[] = {
+    { NOTE_C5, 90 },
+    { NOTE_E5, 90 },
+    { NOTE_G5, 110 },
+    { NOTE_C6, 250 }
+  };
+  queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  Serial.println(F("[BUZZER] Boot startup chime played"));
 }
 
 void triggerNoticeBeep() {
-#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
-  buzzerStepCount = 0;
-  buzzerStepIndex = -1;
-  buzzerSoundOff();
+  // Lively Marimba Alert Chime (E6 -> G6 -> C6)
+  const BuzzerNote melody[] = {
+    { NOTE_E6, 100 }, { REST, 40 },
+    { NOTE_G6, 120 }, { REST, 40 },
+    { NOTE_C6, 250 }
+  };
+  queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  Serial.println(F("[BUZZER] Notice announcement chime triggered"));
+}
 
-  // Short dual blip for incoming notices
-  buzzerSteps[0] = { true, BUZZER_BEEP_DURATION_MS };
-  buzzerSteps[1] = { false, BUZZER_BEEP_PAUSE_MS };
-  buzzerSteps[2] = { true, BUZZER_BEEP_DURATION_MS };
-  buzzerStepCount = 3;
+void playBellPattern(const char* pattern) {
+  String p = String(pattern);
+  p.toLowerCase();
 
-  buzzerStepIndex = 0;
-  buzzerSoundOn();
-  nextBuzzerStepMs = millis() + buzzerSteps[0].durationMs;
-#endif
+  if (p == "westminster") {
+    // 8-note Westminster Quarters (Big Ben chime)
+    const BuzzerNote melody[] = {
+      { NOTE_E5, 320 }, { NOTE_GS5, 320 }, { NOTE_FS5, 320 }, { NOTE_B4, 550 },
+      { REST, 150 },
+      { NOTE_E5, 320 }, { NOTE_FS5, 320 }, { NOTE_GS5, 320 }, { NOTE_E5, 650 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else if (p == "triple-chime") {
+    // Gentle 3-Note Harmonic Break Chime
+    const BuzzerNote melody[] = {
+      { NOTE_C5, 280 }, { REST, 70 },
+      { NOTE_E5, 280 }, { REST, 70 },
+      { NOTE_G5, 550 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else if (p == "lunch-fanfare") {
+    // Joyful 6-Note Lunch Chime
+    const BuzzerNote melody[] = {
+      { NOTE_C5, 180 }, { NOTE_E5, 180 }, { NOTE_G5, 180 },
+      { NOTE_C6, 260 }, { NOTE_G5, 180 }, { NOTE_C6, 480 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else if (p == "dismissal-chime") {
+    // Celebratory 7-Note Scale
+    const BuzzerNote melody[] = {
+      { NOTE_C5, 150 }, { NOTE_D5, 150 }, { NOTE_E5, 150 },
+      { NOTE_F5, 150 }, { NOTE_G5, 150 }, { NOTE_A5, 150 }, { NOTE_C6, 600 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else if (p == "ding-dong") {
+    // Warm 2-Tone Transition
+    const BuzzerNote melody[] = {
+      { NOTE_G5, 300 }, { REST, 80 },
+      { NOTE_E5, 500 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else if (p == "marimba-cascade") {
+    // 5-Note Flowing Chime (C6 -> A5 -> G5 -> E5 -> C5)
+    const BuzzerNote melody[] = {
+      { NOTE_C6, 120 }, { NOTE_A5, 120 }, { NOTE_G5, 120 },
+      { NOTE_E5, 120 }, { NOTE_C5, 400 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else if (p == "st-michael") {
+    // Cathedral 4-Note Cadence (F#5 -> E5 -> D5 -> A4)
+    const BuzzerNote melody[] = {
+      { NOTE_FS5, 300 }, { NOTE_E5, 300 }, { NOTE_D5, 300 }, { NOTE_A4, 600 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else if (p == "digital-synth") {
+    // Future Synth Chime: 5-Note Rising Arpeggio (C5 -> G5 -> C6 -> E6 -> G6)
+    const BuzzerNote melody[] = {
+      { NOTE_C5, 100 }, { NOTE_G5, 100 }, { NOTE_C6, 100 },
+      { NOTE_E6, 100 }, { NOTE_G6, 350 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else if (p == "morning-reveille") {
+    // 5-Note Motivating Assembly Fanfare (C5 -> G4 -> C5 -> E5 -> G5)
+    const BuzzerNote melody[] = {
+      { NOTE_C5, 150 }, { NOTE_G4, 150 }, { NOTE_C5, 150 },
+      { NOTE_E5, 150 }, { NOTE_G5, 450 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else if (p == "gentle-wind") {
+    // 5-Note Relaxing Pentatonic Breeze (D5 -> E5 -> G5 -> A5 -> D6)
+    const BuzzerNote melody[] = {
+      { NOTE_D5, 200 }, { NOTE_E5, 200 }, { NOTE_G5, 200 },
+      { NOTE_A5, 200 }, { NOTE_D6, 500 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else if (p == "double-beep") {
+    // Crisp Dual Tone
+    const BuzzerNote melody[] = {
+      { NOTE_A5, 180 }, { REST, 80 },
+      { NOTE_E6, 350 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else if (p == "single-long") {
+    // Sustained 1.5s Bell
+    const BuzzerNote melody[] = {
+      { NOTE_A5, 1500 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  } else {
+    // Default "college-bell": 3 Ascending Academic Rings
+    const BuzzerNote melody[] = {
+      { NOTE_E5, 450 }, { REST, 150 },
+      { NOTE_GS5, 450 }, { REST, 150 },
+      { NOTE_B5, 900 }
+    };
+    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  }
+  Serial.printf("[BUZZER] Playing musical chime pattern: '%s' (%d notes)\n", pattern, chimeNoteCount);
 }
 
 void handleBuzzer() {
-#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
-  if (buzzerStepIndex < 0 || buzzerStepIndex >= buzzerStepCount) return;
+  if (chimeNoteIndex < 0 || chimeNoteIndex >= chimeNoteCount) return;
 
   unsigned long now = millis();
-  if (now >= nextBuzzerStepMs) {
-    buzzerStepIndex++;
-    if (buzzerStepIndex < buzzerStepCount) {
-      if (buzzerSteps[buzzerStepIndex].soundOn) {
-        buzzerSoundOn();
-      } else {
-        buzzerSoundOff();
-      }
-      nextBuzzerStepMs = now + buzzerSteps[buzzerStepIndex].durationMs;
+  if (now >= nextChimeNoteMs) {
+    chimeNoteIndex++;
+    if (chimeNoteIndex < chimeNoteCount) {
+      setBuzzerFrequency(chimeNotes[chimeNoteIndex].freqHz);
+      nextChimeNoteMs = now + chimeNotes[chimeNoteIndex].durationMs;
     } else {
-      buzzerSoundOff();
-      buzzerStepIndex = -1;
-      buzzerStepCount = 0;
+      silenceBuzzer();
+      chimeNoteIndex = -1;
+      chimeNoteCount = 0;
     }
   }
-#endif
 }
 
 // ==========================================
@@ -237,7 +334,7 @@ volatile unsigned long periodOverAlertUntilMs = 0;
 void loadDefaultTimetable() {
   timetableEnabled = true;
   timetableActiveDays = 0b00111110;
-  strcpy(timetableDefaultPattern, "college-bell");
+  strcpy(timetableDefaultPattern, "westminster");
   timetablePeriodCount = 8;
 
   const char* ids[] = {"p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"};
@@ -256,18 +353,22 @@ void loadDefaultTimetable() {
   int eH[] = {10, 11, 11, 12, 13, 14, 15, 16};
   int eM[] = {0, 0, 15, 15, 15, 15, 15, 15};
   const char* types[] = {"class", "class", "break", "class", "lunch", "class", "class", "lab"};
-  const char* pats[] = {"college-bell", "college-bell", "triple-chime", "college-bell", "triple-chime", "college-bell", "college-bell", "college-bell"};
+  const char* pats[] = {"westminster", "westminster", "triple-chime", "westminster", "lunch-fanfare", "westminster", "westminster", "dismissal-chime"};
 
   for (int i = 0; i < 8; i++) {
     strncpy(timetablePeriods[i].id, ids[i], sizeof(timetablePeriods[i].id) - 1);
+    timetablePeriods[i].id[sizeof(timetablePeriods[i].id) - 1] = '\0';
     strncpy(timetablePeriods[i].name, names[i], sizeof(timetablePeriods[i].name) - 1);
+    timetablePeriods[i].name[sizeof(timetablePeriods[i].name) - 1] = '\0';
     timetablePeriods[i].startHour = sH[i];
     timetablePeriods[i].startMin = sM[i];
     timetablePeriods[i].endHour = eH[i];
     timetablePeriods[i].endMin = eM[i];
     strncpy(timetablePeriods[i].type, types[i], sizeof(timetablePeriods[i].type) - 1);
+    timetablePeriods[i].type[sizeof(timetablePeriods[i].type) - 1] = '\0';
     timetablePeriods[i].enabled = true;
     strncpy(timetablePeriods[i].pattern, pats[i], sizeof(timetablePeriods[i].pattern) - 1);
+    timetablePeriods[i].pattern[sizeof(timetablePeriods[i].pattern) - 1] = '\0';
   }
 }
 
@@ -286,6 +387,7 @@ bool parseTimetableJson(const String& jsonStr) {
     const char* dp = doc["defaultPattern"];
     if (dp && strlen(dp) > 0) {
       strncpy(timetableDefaultPattern, dp, sizeof(timetableDefaultPattern) - 1);
+      timetableDefaultPattern[sizeof(timetableDefaultPattern) - 1] = '\0';
     }
   }
   if (doc.containsKey("activeDays")) {
@@ -314,9 +416,13 @@ bool parseTimetableJson(const String& jsonStr) {
       bool pen = obj.containsKey("enabled") ? obj["enabled"].as<bool>() : true;
 
       strncpy(p.id, pid, sizeof(p.id) - 1);
+      p.id[sizeof(p.id) - 1] = '\0';
       strncpy(p.name, pname, sizeof(p.name) - 1);
+      p.name[sizeof(p.name) - 1] = '\0';
       strncpy(p.type, ptype, sizeof(p.type) - 1);
+      p.type[sizeof(p.type) - 1] = '\0';
       strncpy(p.pattern, ppat, sizeof(p.pattern) - 1);
+      p.pattern[sizeof(p.pattern) - 1] = '\0';
       p.enabled = pen;
 
       sscanf(st, "%d:%d", &p.startHour, &p.startMin);
@@ -2064,12 +2170,15 @@ void handleTimeSync() {
   }
 
   if (epoch > 1700000000) {
-    struct timeval tv;
-    tv.tv_sec = epoch;
-    tv.tv_usec = 0;
-    settimeofday(&tv, NULL);
+    time_t current = time(nullptr);
+    if (abs((long)(current - epoch)) > 3) {
+      struct timeval tv;
+      tv.tv_sec = epoch;
+      tv.tv_usec = 0;
+      settimeofday(&tv, NULL);
+      Serial.printf("[TIME] Manually synchronized epoch: %ld\n", (long)epoch);
+    }
     server.send(200, "application/json", "{\"status\":\"ok\",\"synced_epoch\":" + String((long)epoch) + "}");
-    Serial.printf("[TIME] Manually synchronized epoch: %ld\n", (long)epoch);
     return;
   }
   server.send(400, "application/json", "{\"error\":\"invalid epoch\"}");
@@ -2277,14 +2386,7 @@ void playBootAnimation() {
     delay(25);
   }
 
-  // Stage 2: Welcome audio chirp on 3V buzzer
-#if defined(BUZZER_PIN) && BUZZER_PIN >= 0
-  buzzerSoundOn();
-  delay(35);
-  buzzerSoundOff();
-#endif
-
-  // Stage 3: Smooth loading progress bar revealing full FISAT Department banner
+  // Stage 2: Smooth loading progress bar revealing full FISAT Department banner
   for (int p = 0; p <= 100; p += 10) {
     if (oledFound) drawScreen_1(display, p);
     if (noticeOledFound) drawScreen_1(displayNotice, p);
@@ -2347,7 +2449,7 @@ void setup() {
   // 1b. Initialize 3V Audio Alert Buzzer
 #if defined(BUZZER_PIN) && BUZZER_PIN >= 0
   pinMode(BUZZER_PIN, OUTPUT);
-  buzzerSoundOff();
+  silenceBuzzer();
   Serial.printf("[HARDWARE] 3V Alert Buzzer initialized on GPIO %d (Type: %s)\n", 
                 BUZZER_PIN, BUZZER_IS_ACTIVE ? "ACTIVE" : "PASSIVE");
 #endif
@@ -2540,6 +2642,9 @@ void setup() {
   xTaskCreatePinnedToCore(supabaseCloudTask, "SupabaseCloudTask", 16384, NULL,
                           1, NULL, 0);
   Serial.println(F("[OK] Supabase Cloud Background Task started on Core 0"));
+
+  // 10. Play Startup Chord Arpeggio
+  playBootChime();
 }
 
 // ==========================================
@@ -2634,11 +2739,10 @@ void syncWithSupabase() {
 
     WiFiClientSecure client;
     client.setInsecure(); // Supabase HTTPS
-    client.setTimeout(
-        5000); // 5000ms socket timeout (allows TLS handshake over Internet)
+    client.setTimeout(7000); // 7000ms socket timeout (allows TLS handshake over Internet)
 
     HTTPClient https;
-    https.setTimeout(5000);
+    https.setTimeout(7000);
     String url = String(SUPABASE_URL) + "/rest/v1/devices?select=id,status";
     if (https.begin(client, url)) {
       https.addHeader("apikey", SUPABASE_KEY);
@@ -2885,9 +2989,9 @@ void syncWithSupabase() {
 
     WiFiClientSecure client;
     client.setInsecure();
-    client.setTimeout(5000);
+    client.setTimeout(7000);
     HTTPClient https;
-    https.setTimeout(5000);
+    https.setTimeout(7000);
 
     if (telemetryStep == 0) {
       // Slot 0: Classroom A101 Telemetry
@@ -2971,9 +3075,8 @@ void syncWithSupabase() {
       }
     } else {
       // Slot 4: Cloud Digital Notice Board Announcements
-      // Try dedicated announcements table first, fallback to legacy notifications table
+      // Reads dedicated active announcements from Supabase
       String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?is_active=eq.true&order=created_at.desc&limit=8";
-      bool fetched = false;
       if (https.begin(client, urlAnn)) {
         https.addHeader("apikey", SUPABASE_KEY);
         https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
@@ -2986,32 +3089,10 @@ void syncWithSupabase() {
           DeserializationError err = deserializeJson(doc, payload);
           if (!err && doc.is<JsonArray>()) {
             reconcileNoticesFromCloud(doc.as<JsonArray>());
-            fetched = true;
           }
         }
         https.end();
         client.stop();
-      }
-
-      if (!fetched) {
-        String urlFallback = String(SUPABASE_URL) + "/rest/v1/notifications?type=like.notice*&order=created_at.desc&limit=8";
-        if (https.begin(client, urlFallback)) {
-          https.addHeader("apikey", SUPABASE_KEY);
-          https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
-          https.addHeader("Accept", "application/json");
-
-          int code = https.GET();
-          if (code == 200) {
-            String payload = https.getString();
-            StaticJsonDocument<2048> doc;
-            DeserializationError err = deserializeJson(doc, payload);
-            if (!err && doc.is<JsonArray>()) {
-              reconcileNoticesFromCloud(doc.as<JsonArray>());
-            }
-          }
-          https.end();
-          client.stop();
-        }
       }
     }
 
@@ -3029,14 +3110,9 @@ void reconcileNoticesFromCloud(JsonArray cloudNotices) {
     const char* cid = a["classroom_id"];
     const char* atitle = a["title"];
     const char* amsg = a["message"];
-    const char* atype = a["type"];
     const char* adur = a["duration"];
-    String dur = "24h";
-    if (adur && strlen(adur) > 0) {
-      dur = String(adur);
-    } else if (atype && strstr(atype, "notice:") == atype) {
-      dur = String(atype + 7);
-    }
+    String dur = (adur && strlen(adur) > 0) ? String(adur) : "24h";
+
     if (aid && atitle && amsg && updatedCount < MAX_FIRMWARE_NOTICES) {
       updated[updatedCount].id = String(aid);
       updated[updatedCount].classroomId = cid ? String(cid) : "all";
@@ -3074,26 +3150,6 @@ void reconcileNoticesFromCloud(JsonArray cloudNotices) {
   }
 
   if (changed) {
-    // Check if there is a brand new notice that didn't exist locally before
-    bool hasBrandNewNotice = false;
-    for (int i = 0; i < updatedCount; i++) {
-      bool exists = false;
-      for (int k = 0; k < noticeCount; k++) {
-        if (notices[k].id == updated[i].id) {
-          exists = true;
-          break;
-        }
-      }
-      if (!exists) {
-        hasBrandNewNotice = true;
-        break;
-      }
-    }
-
-    if (hasBrandNewNotice && cloud_initialized) {
-      triggerNoticeBeep();
-    }
-
     // Preserve breaking notice popup if the notice still exists
     bool keepPopup = false;
     if (newNoticePopupUntilMs > millis() && activeNoticePopupIndex >= 0 && activeNoticePopupIndex < noticeCount) {
@@ -3132,9 +3188,7 @@ void fetchNoticesFromSupabaseCloud() {
   client.setInsecure();
   client.setTimeout(4000);
   HTTPClient https;
-  // Primary: dedicated announcements table
   String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?is_active=eq.true&order=created_at.desc&limit=8";
-  bool fetched = false;
   if (https.begin(client, urlAnn)) {
     https.addHeader("apikey", SUPABASE_KEY);
     https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
@@ -3147,33 +3201,10 @@ void fetchNoticesFromSupabaseCloud() {
       DeserializationError err = deserializeJson(doc, payload);
       if (!err && doc.is<JsonArray>()) {
         reconcileNoticesFromCloud(doc.as<JsonArray>());
-        fetched = true;
       }
     }
     https.end();
     client.stop();
-  }
-
-  // Fallback if announcements table hasn't been created yet
-  if (!fetched) {
-    String urlFallback = String(SUPABASE_URL) + "/rest/v1/notifications?type=like.notice*&order=created_at.desc&limit=8";
-    if (https.begin(client, urlFallback)) {
-      https.addHeader("apikey", SUPABASE_KEY);
-      https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
-      https.addHeader("Accept", "application/json");
-
-      int code = https.GET();
-      if (code == 200) {
-        String payload = https.getString();
-        StaticJsonDocument<2048> doc;
-        DeserializationError err = deserializeJson(doc, payload);
-        if (!err && doc.is<JsonArray>()) {
-          reconcileNoticesFromCloud(doc.as<JsonArray>());
-        }
-      }
-      https.end();
-      client.stop();
-    }
   }
 }
 

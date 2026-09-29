@@ -325,6 +325,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const lastUserToggleRef = useRef<Record<string, number>>({});
   const pendingUserToggleStateRef = useRef<Record<string, DeviceStatus>>({});
   const lastNoticeSyncRef = useRef<number>(0);
+  const lastTimeSyncRef = useRef<number>(0);
   const noticesRef = useRef<NoticeItem[]>([]);
 
   const setThemeMode = useCallback((mode: ThemeMode) => {
@@ -819,9 +820,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isLanReachableRef.current = true;
       setEsp32Connected(true);
 
-      // Opportunistically synchronize phone real-time clock to ESP32 notice board
-      const phoneEpochSec = Math.floor(Date.now() / 1000);
-      fetch(`${baseUrl}/api/time?epoch=${phoneEpochSec}`).catch(() => {});
+      // Opportunistically synchronize phone real-time clock to ESP32 notice board at most once every 10 minutes
+      const nowMs = Date.now();
+      if (nowMs - lastTimeSyncRef.current > 600000) {
+        lastTimeSyncRef.current = nowMs;
+        const phoneEpochSec = Math.floor(nowMs / 1000);
+        fetch(`${baseUrl}/api/time?epoch=${phoneEpochSec}`).catch(() => {});
+      }
       const telemetry: ESP32Telemetry = {
         ip: data.controller?.ip || esp32Ip,
         ssid: data.controller?.ssid,

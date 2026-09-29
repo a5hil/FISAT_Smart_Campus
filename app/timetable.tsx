@@ -23,10 +23,19 @@ const DAYS = [
 ];
 
 const BELL_PATTERNS: { id: BellPattern; name: string; desc: string; icon: string }[] = [
-  { id: 'college-bell', name: 'College Bell', desc: '3 Long Classic Rings', icon: 'notifications' },
-  { id: 'triple-chime', name: 'Triple Chime', desc: '3 Gentle Beeps', icon: 'musical-notes' },
+  { id: 'westminster', name: 'Westminster Chime', desc: '8-Note Big Ben Quarters', icon: 'musical-notes' },
+  { id: 'college-bell', name: 'College Bell', desc: '3 Ascending Academic Rings', icon: 'notifications' },
+  { id: 'triple-chime', name: 'Triple Chime', desc: '3 Gentle Harmonic Notes', icon: 'volume-medium' },
+  { id: 'lunch-fanfare', name: 'Lunch Fanfare', desc: '6-Note Upbeat Melody', icon: 'restaurant' },
+  { id: 'dismissal-chime', name: 'Dismissal Scale', desc: '7-Note End-of-Day Chime', icon: 'walk' },
+  { id: 'ding-dong', name: 'Classic Ding-Dong', desc: 'Warm 2-Tone Transition', icon: 'notifications-circle' },
+  { id: 'marimba-cascade', name: 'Marimba Cascade', desc: '5-Note Flowing Chime', icon: 'water' },
+  { id: 'st-michael', name: 'St. Michael Chime', desc: 'Cathedral 4-Note Cadence', icon: 'school' },
+  { id: 'digital-synth', name: 'Future Synth Chime', desc: '5-Note Rising Arpeggio', icon: 'sparkles' },
+  { id: 'morning-reveille', name: 'Morning Fanfare', desc: '5-Note Motivating Assembly', icon: 'sunny' },
+  { id: 'gentle-wind', name: 'Gentle Pentatonic', desc: '5-Note Relaxing Breeze', icon: 'leaf' },
   { id: 'double-beep', name: 'Double Beep', desc: '2 Crisp Alert Beeps', icon: 'flash' },
-  { id: 'single-long', name: 'Single Long', desc: '1 Solid 1.0s Bell', icon: 'volume-high' },
+  { id: 'single-long', name: 'Single Long', desc: '1 Solid 1.5s Bell', icon: 'volume-high' },
 ];
 
 export default function TimetableScreen() {
@@ -353,11 +362,29 @@ export default function TimetableScreen() {
                   onPress={() => handleSelectPattern(pat.id)}
                   activeOpacity={0.75}
                 >
-                  <Ionicons
-                    name={pat.icon as any}
-                    size={18}
-                    color={selected ? colors.primary : colors.textMuted}
-                  />
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                    <Ionicons
+                      name={pat.icon as any}
+                      size={18}
+                      color={selected ? colors.primary : colors.textMuted}
+                    />
+                    <TouchableOpacity
+                      onPress={async (e) => {
+                        e.stopPropagation();
+                        setTestingBell(true);
+                        await triggerBellTest(pat.id);
+                        setTestingBell(false);
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={{ padding: 2 }}
+                    >
+                      <Ionicons
+                        name="play-circle-outline"
+                        size={18}
+                        color={selected ? colors.primary : colors.textMuted}
+                      />
+                    </TouchableOpacity>
+                  </View>
                   <Text style={[styles.patternName, selected && styles.patternNameActive]}>
                     {pat.name}
                   </Text>
@@ -384,7 +411,7 @@ export default function TimetableScreen() {
           return (
             <View key={p.id} style={[styles.periodCard, !p.enabled && styles.periodCardDisabled]}>
               <View style={[styles.periodTypeBar, { backgroundColor: typeColor }]} />
-              
+
               <View style={styles.periodContent}>
                 <View style={styles.periodTopRow}>
                   <View style={styles.periodTitleRow}>

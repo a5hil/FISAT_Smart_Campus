@@ -208,7 +208,20 @@ export interface NoticeItem {
   isActive: boolean;
 }
 
-export type BellPattern = 'college-bell' | 'triple-chime' | 'double-beep' | 'single-long';
+export type BellPattern =
+  | 'westminster'
+  | 'college-bell'
+  | 'triple-chime'
+  | 'lunch-fanfare'
+  | 'dismissal-chime'
+  | 'double-beep'
+  | 'single-long'
+  | 'ding-dong'
+  | 'marimba-cascade'
+  | 'st-michael'
+  | 'digital-synth'
+  | 'morning-reveille'
+  | 'gentle-wind';
 
 export interface TimetablePeriod {
   id: string;

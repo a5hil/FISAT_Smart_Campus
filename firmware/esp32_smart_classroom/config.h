@@ -47,9 +47,9 @@ const char *const SUPABASE_KEY =
 
 // Cloud Polling & Telemetry Frequencies
 const unsigned long SUPABASE_POLL_INTERVAL_MS =
-    1000; // Poll device state changes from cloud every 1.0s
+    2500; // Poll device state changes from cloud every 2.5s (prevents TLS handshake timeout)
 const unsigned long SUPABASE_TELEMETRY_INTERVAL_MS =
-    4000; // Push one rotating telemetry slot every 4.0s
+    6000; // Push one rotating telemetry slot every 6.0s
 
 // ==========================================
 // --- CLASSROOM MAPPING (App Schema) ---
@@ -91,24 +91,24 @@ const unsigned long SUPABASE_TELEMETRY_INTERVAL_MS =
 #define GMT_OFFSET_SEC 19800    // UTC+5:30 (Indian Standard Time: 5.5h * 3600 = 19800s)
 #define DAYLIGHT_OFFSET_SEC 0   // No daylight saving time in IST
 
-// --- 3V Audio Alert Buzzer ---
-// Configurable GPIO pin for audio alerts (e.g. short beep on new notice)
-// GPIO 23 is general-purpose, boot-safe, and has 3.3V drive capability
+// --- Audio Alert Buzzer (Passive Piezo or Active Buzzer) ---
+// Configurable GPIO pin for audio alerts & musical chimes
+// GPIO 23 is a dedicated general-purpose pin (NO boot-strapping, NO boot noise, 100% silent on startup)
+// Wiring: Buzzer (+) -> GPIO 23, Buzzer (-) -> GND (ESP32 Ground)
 #define BUZZER_PIN 23
 
 // Buzzer Mode:
-// Set to true if using an Active Buzzer (built-in oscillator, driven by DC HIGH/LOW)
-// Set to false if using a Passive Buzzer (driven by frequency tone PWM)
-#define BUZZER_IS_ACTIVE true
+// Set to false if using a Passive Piezo Buzzer (driven by musical PWM frequencies / tones)
+// Set to true if using an Active Buzzer (built-in 5V/3V oscillator, driven by DC HIGH/LOW)
+#define BUZZER_IS_ACTIVE false
 
 // Logic level for Active Buzzer:
-// Most 3V active buzzers are Active-HIGH (HIGH = sound, LOW = silence)
 #define BUZZER_ACTIVE_HIGH true
 
-// Default frequency for passive buzzer (Hz)
+// Default frequency for generic passive beeps (Hz)
 #define BUZZER_TONE_FREQ 2700
 
-// Notification chime parameters
+// Notification chime parameters (for active buzzer fallback)
 #define BUZZER_NOTICE_BEEPS 2       // Number of short beeps on new notice
 #define BUZZER_BEEP_DURATION_MS 90  // Milliseconds per beep
 #define BUZZER_BEEP_PAUSE_MS 60     // Pause between multiple beeps
