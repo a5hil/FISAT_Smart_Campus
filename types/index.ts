@@ -232,6 +232,7 @@ export interface TimetablePeriod {
   type: 'class' | 'break' | 'lunch' | 'lab';
   enabled: boolean;
   bellPattern?: BellPattern;
+  days?: number[];   // e.g. [5] for Friday only, [1,2,3,4] for Mon-Thu. If omitted/empty, applies to all activeDays.
 }
 
 export interface TimetableConfig {

@@ -343,9 +343,10 @@ struct TimetablePeriodFirmware {
   char type[12]; // "class", "break", "lunch", "lab"
   bool enabled;
   char pattern[32];
+  uint8_t days; // Bitmask of active days (bit 0=Sun, 1=Mon..6=Sat). 0 = all active days
 };
 
-#define MAX_TIMETABLE_PERIODS 12
+#define MAX_TIMETABLE_PERIODS 24
 TimetablePeriodFirmware timetablePeriods[MAX_TIMETABLE_PERIODS];
 int timetablePeriodCount = 0;
 bool timetableEnabled = true;
@@ -395,6 +396,7 @@ void loadDefaultTimetable() {
     timetablePeriods[i].enabled = true;
     strncpy(timetablePeriods[i].pattern, pats[i], sizeof(timetablePeriods[i].pattern) - 1);
     timetablePeriods[i].pattern[sizeof(timetablePeriods[i].pattern) - 1] = '\0';
+    timetablePeriods[i].days = 0;
   }
 }
 
@@ -450,6 +452,15 @@ bool parseTimetableJson(const String& jsonStr) {
       strncpy(p.pattern, ppat, sizeof(p.pattern) - 1);
       p.pattern[sizeof(p.pattern) - 1] = '\0';
       p.enabled = pen;
+      p.days = 0;
+      if (obj.containsKey("days")) {
+        JsonArray dArr = obj["days"].as<JsonArray>();
+        for (int d : dArr) {
+          if (d >= 0 && d <= 6) {
+            p.days |= (1 << d);
+          }
+        }
+      }
 
       sscanf(st, "%d:%d", &p.startHour, &p.startMin);
       sscanf(et, "%d:%d", &p.endHour, &p.endMin);
@@ -507,6 +518,7 @@ void checkTimetableBell() {
 
   for (int i = 0; i < timetablePeriodCount; i++) {
     if (!timetablePeriods[i].enabled) continue;
+    if (timetablePeriods[i].days != 0 && !(timetablePeriods[i].days & currentDayBit)) continue;
 
     if (timetablePeriods[i].endHour == currentHour && timetablePeriods[i].endMin == currentMin) {
       lastBellRungHour = currentHour;
@@ -2254,6 +2266,14 @@ void handleTimetableGet() {
     p["type"] = timetablePeriods[i].type;
     p["enabled"] = timetablePeriods[i].enabled;
     p["bellPattern"] = timetablePeriods[i].pattern;
+    if (timetablePeriods[i].days != 0) {
+      JsonArray dArr = p.createNestedArray("days");
+      for (int d = 0; d <= 6; d++) {
+        if (timetablePeriods[i].days & (1 << d)) {
+          dArr.add(d);
+        }
+      }
+    }
 
     char buf[8];
     snprintf(buf, sizeof(buf), "%02d:%02d", timetablePeriods[i].startHour, timetablePeriods[i].startMin);

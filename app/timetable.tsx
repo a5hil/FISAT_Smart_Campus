@@ -13,13 +13,13 @@ import { useApp, useTheme } from '../context/AppContext';
 import { TimetableConfig, TimetablePeriod, BellPattern } from '../types';
 
 const DAYS = [
-  { day: 1, label: 'Mon' },
-  { day: 2, label: 'Tue' },
-  { day: 3, label: 'Wed' },
-  { day: 4, label: 'Thu' },
-  { day: 5, label: 'Fri' },
-  { day: 6, label: 'Sat' },
-  { day: 0, label: 'Sun' },
+  { day: 1, label: 'Mon', full: 'Monday' },
+  { day: 2, label: 'Tue', full: 'Tuesday' },
+  { day: 3, label: 'Wed', full: 'Wednesday' },
+  { day: 4, label: 'Thu', full: 'Thursday' },
+  { day: 5, label: 'Fri', full: 'Friday' },
+  { day: 6, label: 'Sat', full: 'Saturday' },
+  { day: 0, label: 'Sun', full: 'Sunday' },
 ];
 
 const BELL_PATTERNS: { id: BellPattern; name: string; desc: string; icon: string }[] = [
@@ -56,6 +56,20 @@ export default function TimetableScreen() {
   const [periodType, setPeriodType] = useState<'class' | 'break' | 'lunch' | 'lab'>('class');
   const [testingBell, setTestingBell] = useState(false);
 
+  // Day filter tab ('all' or day index 0..6)
+  const [selectedDayTab, setSelectedDayTab] = useState<number | 'all'>('all');
+
+  // Modal to select default fallback bell tone
+  const [defaultToneModalVisible, setDefaultToneModalVisible] = useState(false);
+
+  // Add/Edit modal: customized chime and day assignments
+  const [periodBellPattern, setPeriodBellPattern] = useState<BellPattern>(activeConfig.defaultPattern);
+  const [periodDays, setPeriodDays] = useState<number[]>([]);
+
+  const currentDefaultPattern = React.useMemo(() => {
+    return BELL_PATTERNS.find(b => b.id === activeConfig.defaultPattern) || BELL_PATTERNS[0];
+  }, [activeConfig.defaultPattern]);
+
   // Sync state if context updates
   useEffect(() => {
     setActiveConfig(timetable);
@@ -86,13 +100,15 @@ export default function TimetableScreen() {
         return;
       }
 
-      // Find current period
+      // Find current period matching today's active schedule
       let foundCurrent: TimetablePeriod | null = null;
       let foundNext: TimetablePeriod | null = null;
       let minDiff: number | null = null;
 
       for (const p of activeConfig.periods) {
         if (!p.enabled) continue;
+        if (p.days && p.days.length > 0 && !p.days.includes(today)) continue;
+
         const [sH, sM] = p.startTime.split(':').map(Number);
         const [eH, eM] = p.endTime.split(':').map(Number);
         const pStartMin = sH * 60 + sM;
@@ -158,12 +174,40 @@ export default function TimetableScreen() {
     setTestingBell(false);
   };
 
+  const formatPeriodDays = (days?: number[]) => {
+    if (!days || days.length === 0) return 'All Active Days';
+    if (days.length === 1) {
+      const d = DAYS.find(x => x.day === days[0]);
+      return `${d ? d.label : days[0]} Only`;
+    }
+    const sorted = [...days].sort((a, b) => a - b);
+    if (sorted.length === 4 && sorted.join(',') === '1,2,3,4') return 'Mon – Thu';
+    if (sorted.length === 5 && sorted.join(',') === '1,2,3,4,5') return 'Mon – Fri';
+    return sorted.map(d => DAYS.find(x => x.day === d)?.label || d).join(', ');
+  };
+
+  const getPeriodChime = (pat?: BellPattern) => {
+    const id = pat || activeConfig.defaultPattern;
+    return BELL_PATTERNS.find(b => b.id === id) || BELL_PATTERNS[0];
+  };
+
+  const displayedPeriods = React.useMemo(() => {
+    if (selectedDayTab === 'all') return activeConfig.periods;
+    return activeConfig.periods.filter(p => !p.days || p.days.length === 0 || p.days.includes(selectedDayTab));
+  }, [activeConfig.periods, selectedDayTab]);
+
   const openAddModal = () => {
     setEditingPeriodId(null);
-    setPeriodName(`Period ${activeConfig.periods.filter(p => p.type === 'class').length + 1}`);
+    const dayFilteredPeriods = selectedDayTab === 'all'
+      ? activeConfig.periods
+      : activeConfig.periods.filter(p => !p.days || p.days.length === 0 || p.days.includes(selectedDayTab));
+
+    setPeriodName(`Period ${dayFilteredPeriods.filter(p => p.type === 'class').length + 1}`);
     setStartTime('09:00');
     setEndTime('10:00');
     setPeriodType('class');
+    setPeriodBellPattern(activeConfig.defaultPattern);
+    setPeriodDays(selectedDayTab !== 'all' ? [selectedDayTab] : []);
     setModalVisible(true);
   };
 
@@ -173,6 +217,8 @@ export default function TimetableScreen() {
     setStartTime(p.startTime);
     setEndTime(p.endTime);
     setPeriodType(p.type);
+    setPeriodBellPattern(p.bellPattern || activeConfig.defaultPattern);
+    setPeriodDays(p.days && p.days.length > 0 ? [...p.days] : []);
     setModalVisible(true);
   };
 
@@ -186,23 +232,47 @@ export default function TimetableScreen() {
       return;
     }
 
+    const normalizeTime = (t: string) => {
+      const parts = t.trim().split(':');
+      if (parts.length === 2) {
+        const hh = parts[0].padStart(2, '0');
+        const mm = parts[1].padStart(2, '0');
+        return `${hh}:${mm}`;
+      }
+      return t.trim();
+    };
+
+    const cleanStart = normalizeTime(startTime);
+    const cleanEnd = normalizeTime(endTime);
+
+    if (cleanStart >= cleanEnd) {
+      RNAlert.alert('Invalid Time', 'End time must be later than start time.');
+      return;
+    }
+
+    const assignedDays = periodDays.length > 0 ? [...periodDays].sort((a, b) => a - b) : undefined;
+
     let updatedPeriods = [...activeConfig.periods];
     if (editingPeriodId) {
       updatedPeriods = updatedPeriods.map(p => p.id === editingPeriodId ? {
         ...p,
         name: periodName.trim(),
-        startTime: startTime.trim(),
-        endTime: endTime.trim(),
+        startTime: cleanStart,
+        endTime: cleanEnd,
         type: periodType,
+        bellPattern: periodBellPattern,
+        days: assignedDays,
       } : p);
     } else {
       const newP: TimetablePeriod = {
         id: `p-${Date.now()}`,
         name: periodName.trim(),
-        startTime: startTime.trim(),
-        endTime: endTime.trim(),
+        startTime: cleanStart,
+        endTime: cleanEnd,
         type: periodType,
         enabled: true,
+        bellPattern: periodBellPattern,
+        days: assignedDays,
       };
       updatedPeriods.push(newP);
     }
@@ -214,6 +284,44 @@ export default function TimetableScreen() {
     setActiveConfig(updated);
     void updateTimetable(updated);
     setModalVisible(false);
+  };
+
+  const handleDuplicateToDay = (targetDay: number) => {
+    const targetLabel = DAYS.find(d => d.day === targetDay)?.full || DAYS.find(d => d.day === targetDay)?.label || `Day ${targetDay}`;
+    const basePeriods = activeConfig.periods.filter(p => !p.days || p.days.length === 0 || p.days.includes(1));
+    if (basePeriods.length === 0) {
+      RNAlert.alert('Notice', 'No standard schedule periods available to copy.');
+      return;
+    }
+
+    RNAlert.alert(
+      `Copy to ${targetLabel}`,
+      `Would you like to copy ${basePeriods.length} periods from your standard schedule to ${targetLabel}? You can then adjust timings specifically for this day.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Copy Schedule',
+          onPress: () => {
+            const duplicated: TimetablePeriod[] = basePeriods.map((p, idx) => ({
+              ...p,
+              id: `p-${Date.now()}-${idx}`,
+              name: p.name,
+              startTime: p.startTime,
+              endTime: p.endTime,
+              type: p.type,
+              enabled: true,
+              bellPattern: p.bellPattern || activeConfig.defaultPattern,
+              days: [targetDay],
+            }));
+            const updatedPeriods = [...activeConfig.periods, ...duplicated];
+            updatedPeriods.sort((a, b) => a.startTime.localeCompare(b.startTime));
+            const updated = { ...activeConfig, periods: updatedPeriods };
+            setActiveConfig(updated);
+            void updateTimetable(updated);
+          }
+        }
+      ]
+    );
   };
 
   const handleDeletePeriod = (id: string) => {
@@ -256,9 +364,6 @@ export default function TimetableScreen() {
           <Text style={styles.headerTitle}>Class Timetable & Bell</Text>
           <Text style={styles.headerSubtitle}>FISAT Automated Period Schedule</Text>
         </View>
-        <TouchableOpacity style={styles.addIconButton} onPress={openAddModal}>
-          <Ionicons name="add" size={24} color={colors.primary} />
-        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -280,10 +385,15 @@ export default function TimetableScreen() {
               <Text style={styles.currentPeriodTime}>
                 {currentPeriod.startTime} — {currentPeriod.endTime}
               </Text>
-              <View style={styles.countdownBadge}>
-                <Ionicons name="alarm-outline" size={16} color={colors.primary} />
-                <Text style={styles.countdownText}>
-                  Hour ends in {minutesRemaining} min{minutesRemaining === 1 ? '' : 's'} (Buzzer will ring)
+              <View style={[styles.countdownBadge, !activeConfig.enabled && styles.countdownBadgePaused]}>
+                <Ionicons
+                  name={activeConfig.enabled ? "alarm-outline" : "notifications-off-outline"}
+                  size={16}
+                  color={activeConfig.enabled ? colors.primary : colors.textMuted}
+                />
+                <Text style={[styles.countdownText, !activeConfig.enabled && styles.countdownTextPaused]}>
+                  Hour ends in {minutesRemaining} min{minutesRemaining === 1 ? '' : 's'}
+                  {activeConfig.enabled ? ' (Buzzer will ring)' : ' (Bell paused)'}
                 </Text>
               </View>
             </View>
@@ -307,7 +417,7 @@ export default function TimetableScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.sectionTitle}>Automated Period Bell</Text>
-              <Text style={styles.sectionSubtitle}>Beeps 3V buzzer when each hour is over</Text>
+              <Text style={styles.sectionSubtitle}>Bell rings when each hour is over</Text>
             </View>
             <Switch
               value={activeConfig.enabled}
@@ -337,133 +447,251 @@ export default function TimetableScreen() {
             })}
           </View>
 
-          {/* Chime Pattern Options */}
-          <View style={styles.patternHeaderRow}>
-            <Text style={styles.subLabel}>Period End Bell Tone</Text>
-            <TouchableOpacity
-              style={styles.testBellBtn}
-              onPress={handleTestBell}
-              disabled={testingBell}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="volume-medium-outline" size={15} color={colors.primary} />
-              <Text style={styles.testBellBtnText}>
-                {testingBell ? 'Ringing...' : 'Test Bell'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.patternGrid}>
-            {BELL_PATTERNS.map(pat => {
-              const selected = activeConfig.defaultPattern === pat.id;
-              return (
-                <TouchableOpacity
-                  key={pat.id}
-                  style={[styles.patternCard, selected && styles.patternCardActive]}
-                  onPress={() => handleSelectPattern(pat.id)}
-                  activeOpacity={0.75}
-                >
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                    <Ionicons
-                      name={pat.icon as any}
-                      size={18}
-                      color={selected ? colors.primary : colors.textMuted}
-                    />
-                    <TouchableOpacity
-                      onPress={async (e) => {
-                        e.stopPropagation();
-                        setTestingBell(true);
-                        await triggerBellTest(pat.id);
-                        setTestingBell(false);
-                      }}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      style={{ padding: 2 }}
-                    >
-                      <Ionicons
-                        name="play-circle-outline"
-                        size={18}
-                        color={selected ? colors.primary : colors.textMuted}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                  <Text style={[styles.patternName, selected && styles.patternNameActive]}>
-                    {pat.name}
+          {/* Default Period Bell & Hardware Test Card */}
+          <View style={styles.defaultToneCard}>
+            <View style={styles.defaultToneHeader}>
+              <TouchableOpacity
+                style={styles.defaultToneLeft}
+                onPress={() => setDefaultToneModalVisible(true)}
+                activeOpacity={0.75}
+              >
+                <View style={styles.defaultToneIconBox}>
+                  <Ionicons name={currentDefaultPattern.icon as any} size={18} color={colors.primary} />
+                </View>
+                <View style={styles.defaultToneInfo}>
+                  <Text style={styles.defaultToneTitle}>Default Period Chime</Text>
+                  <Text style={styles.defaultToneSub} numberOfLines={1}>
+                    {currentDefaultPattern.name} • Fallback tone
                   </Text>
-                  <Text style={styles.patternDesc}>{pat.desc}</Text>
+                </View>
+              </TouchableOpacity>
+
+              <View style={styles.defaultToneRightActions}>
+                <TouchableOpacity
+                  style={styles.defaultToneChangePill}
+                  onPress={() => setDefaultToneModalVisible(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.defaultToneChangeText}>Change</Text>
+                  <Ionicons name="chevron-forward" size={12} color={colors.primary} />
                 </TouchableOpacity>
-              );
-            })}
+
+                <TouchableOpacity
+                  style={[styles.testBuzzerBtnCompact, testingBell && styles.testBuzzerBtnActive]}
+                  onPress={handleTestBell}
+                  disabled={testingBell}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={testingBell ? "radio-outline" : "volume-medium-outline"}
+                    size={14}
+                    color={isDark ? '#000000' : '#FFFFFF'}
+                  />
+                  <Text style={styles.testBuzzerBtnText}>
+                    {testingBell ? 'Ringing...' : 'Test Bell'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         </View>
 
-        {/* Schedule List Section */}
+        {/* Schedule List Header & Day Filter */}
         <View style={styles.scheduleHeaderRow}>
-          <Text style={styles.scheduleSectionTitle}>
-            Daily Schedule ({activeConfig.periods.length} Periods)
-          </Text>
+          <View>
+            <Text style={styles.scheduleSectionTitle}>Class Schedule</Text>
+            <Text style={styles.scheduleSubtitle}>
+              {selectedDayTab === 'all'
+                ? `Showing all ${activeConfig.periods.length} scheduled periods`
+                : `${DAYS.find(d => d.day === selectedDayTab)?.label} timetable (${displayedPeriods.length} periods)`}
+            </Text>
+          </View>
           <TouchableOpacity style={styles.addTextBtn} onPress={openAddModal}>
             <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
             <Text style={styles.addTextBtnLabel}>Add Period</Text>
           </TouchableOpacity>
         </View>
 
-        {activeConfig.periods.map((p, idx) => {
-          const typeColor = getTypeColor(p.type);
-          return (
-            <View key={p.id} style={[styles.periodCard, !p.enabled && styles.periodCardDisabled]}>
-              <View style={[styles.periodTypeBar, { backgroundColor: typeColor }]} />
+        {/* Day Filter Tabs */}
+        <View style={styles.dayFilterContainer}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayFilterScroll}>
+            <TouchableOpacity
+              style={[styles.dayFilterTab, selectedDayTab === 'all' && styles.dayFilterTabActive]}
+              onPress={() => setSelectedDayTab('all')}
+            >
+              <Text style={[styles.dayFilterTabText, selectedDayTab === 'all' && styles.dayFilterTabTextActive]}>
+                All Days
+              </Text>
+              <View style={[styles.dayCountBadge, selectedDayTab === 'all' && styles.dayCountBadgeActive]}>
+                <Text style={[styles.dayCountText, selectedDayTab === 'all' && styles.dayCountTextActive]}>
+                  {activeConfig.periods.length}
+                </Text>
+              </View>
+            </TouchableOpacity>
 
-              <View style={styles.periodContent}>
-                <View style={styles.periodTopRow}>
-                  <View style={styles.periodTitleRow}>
-                    <Text style={[styles.periodNameText, !p.enabled && styles.textDisabled]}>
-                      {p.name}
+            {DAYS.map(d => {
+              const count = activeConfig.periods.filter(p => !p.days || p.days.length === 0 || p.days.includes(d.day)).length;
+              const isSelected = selectedDayTab === d.day;
+              const isToday = new Date().getDay() === d.day;
+
+              return (
+                <TouchableOpacity
+                  key={d.day}
+                  style={[styles.dayFilterTab, isSelected && styles.dayFilterTabActive]}
+                  onPress={() => setSelectedDayTab(d.day)}
+                >
+                  {isToday && <View style={[styles.todayDot, isSelected && { backgroundColor: '#FFF' }]} />}
+                  <Text style={[styles.dayFilterTabText, isSelected && styles.dayFilterTabTextActive]}>
+                    {d.label}
+                  </Text>
+                  <View style={[styles.dayCountBadge, isSelected && styles.dayCountBadgeActive]}>
+                    <Text style={[styles.dayCountText, isSelected && styles.dayCountTextActive]}>
+                      {count}
                     </Text>
-                    <View style={[styles.typeBadge, { borderColor: typeColor }]}>
-                      <Text style={[styles.typeBadgeText, { color: typeColor }]}>
-                        {p.type.toUpperCase()}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {/* Day-specific banner with Copy action */}
+        {selectedDayTab !== 'all' && (
+          <View style={styles.dayBanner}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.dayBannerTitle}>
+                {DAYS.find(d => d.day === selectedDayTab)?.full || DAYS.find(d => d.day === selectedDayTab)?.label} Custom Timetable
+              </Text>
+              <Text style={styles.dayBannerSub}>
+                Periods here apply only on this day
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.duplicateBtn}
+              onPress={() => handleDuplicateToDay(selectedDayTab as number)}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="copy-outline" size={13} color={colors.primary} />
+              <Text style={styles.duplicateBtnText}>Copy Standard Schedule</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {displayedPeriods.length === 0 ? (
+          <View style={styles.emptyDayBox}>
+            <Ionicons name="calendar-outline" size={32} color={colors.textMuted} />
+            <Text style={styles.emptyDayTitle}>
+              No Custom Periods for {selectedDayTab === 'all' ? 'Schedule' : (DAYS.find(d => d.day === selectedDayTab)?.full || DAYS.find(d => d.day === selectedDayTab)?.label)}
+            </Text>
+            <Text style={styles.emptyDaySub}>Add periods or copy from the standard schedule</Text>
+            <TouchableOpacity style={styles.emptyAddBtn} onPress={openAddModal}>
+              <Ionicons name="add" size={16} color={isDark ? '#000' : '#FFF'} />
+              <Text style={styles.emptyAddBtnText}>Add Period for this Day</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          displayedPeriods.map((p, idx) => {
+            const typeColor = getTypeColor(p.type);
+            const pChime = getPeriodChime(p.bellPattern);
+            const dayLabel = formatPeriodDays(p.days);
+
+            return (
+              <View key={p.id} style={[styles.periodCard, !p.enabled && styles.periodCardDisabled]}>
+                <View style={[styles.periodTypeBar, { backgroundColor: typeColor }]} />
+
+                <View style={styles.periodContent}>
+                  <View style={styles.periodTopRow}>
+                    <TouchableOpacity
+                      style={styles.periodTitleRow}
+                      onPress={() => openEditModal(p)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.periodNameText, !p.enabled && styles.textDisabled]}>
+                        {p.name}
+                      </Text>
+                      <View style={[styles.typeBadge, { borderColor: typeColor }]}>
+                        <Text style={[styles.typeBadgeText, { color: typeColor }]}>
+                          {p.type.toUpperCase()}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    <Switch
+                      value={p.enabled}
+                      onValueChange={() => handleTogglePeriod(p.id)}
+                      trackColor={{ false: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)', true: colors.primary }}
+                      thumbColor={p.enabled ? '#FFF' : '#AAA'}
+                      style={{ transform: [{ scale: 0.85 }] }}
+                    />
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.periodMetaRow}
+                    onPress={() => openEditModal(p)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.timeTag}>
+                      <Ionicons name="time-outline" size={13} color={colors.textMuted} />
+                      <Text style={styles.timeTagText}>
+                        {p.startTime} — {p.endTime}
                       </Text>
                     </View>
-                  </View>
 
-                  <Switch
-                    value={p.enabled}
-                    onValueChange={() => handleTogglePeriod(p.id)}
-                    trackColor={{ false: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)', true: colors.primary }}
-                    thumbColor={p.enabled ? '#FFF' : '#AAA'}
-                    style={{ transform: [{ scale: 0.85 }] }}
-                  />
-                </View>
+                    <View style={[styles.dayTag, p.days && p.days.length > 0 && styles.dayTagCustom]}>
+                      <Ionicons
+                        name="calendar-outline"
+                        size={11}
+                        color={p.days && p.days.length > 0 ? (isDark ? '#FCA5A5' : '#DC2626') : colors.textMuted}
+                      />
+                      <Text
+                        style={[styles.dayTagText, p.days && p.days.length > 0 && styles.dayTagTextCustom]}
+                        numberOfLines={1}
+                      >
+                        {dayLabel}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
 
-                <View style={styles.periodBottomRow}>
-                  <View style={styles.timeTag}>
-                    <Ionicons name="time-outline" size={14} color={colors.textMuted} />
-                    <Text style={styles.timeTagText}>
-                      {p.startTime} — {p.endTime}
-                    </Text>
-                  </View>
-
-                  <View style={styles.periodActions}>
+                  <View style={styles.periodBottomRow}>
                     <TouchableOpacity
-                      style={styles.actionBtn}
-                      onPress={() => openEditModal(p)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={styles.chimeBadge}
+                      onPress={async () => {
+                        setTestingBell(true);
+                        await triggerBellTest(pChime.id);
+                        setTestingBell(false);
+                      }}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                      activeOpacity={0.7}
                     >
-                      <Ionicons name="pencil-outline" size={16} color={colors.textMuted} />
+                      <Ionicons name={pChime.icon as any} size={13} color={colors.primary} />
+                      <Text style={styles.chimeBadgeText} numberOfLines={1}>
+                        {pChime.name}
+                      </Text>
+                      <Ionicons name="play-circle" size={14} color={colors.primary} />
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.actionBtn}
-                      onPress={() => handleDeletePeriod(p.id)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons name="trash-outline" size={16} color={colors.critical} />
-                    </TouchableOpacity>
+
+                    <View style={styles.periodActions}>
+                      <TouchableOpacity
+                        style={styles.actionBtn}
+                        onPress={() => openEditModal(p)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons name="create-outline" size={16} color={colors.textMuted} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.actionBtn}
+                        onPress={() => handleDeletePeriod(p.id)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={colors.critical} />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
               </View>
-            </View>
-          );
-        })}
+            );
+          })
+        )}
 
         <View style={{ height: 60 }} />
       </ScrollView>
@@ -479,62 +707,208 @@ export default function TimetableScreen() {
               <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()}>
                 <View style={styles.modalContent}>
                   <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>
-                      {editingPeriodId ? 'Edit Period' : 'Add Schedule Period'}
-                    </Text>
+                    <View>
+                      <Text style={styles.modalTitle}>
+                        {editingPeriodId ? 'Edit Schedule Period' : 'Add Schedule Period'}
+                      </Text>
+                      <Text style={styles.modalSubtitle}>
+                        Set timings, customized chime & days
+                      </Text>
+                    </View>
                     <TouchableOpacity onPress={() => setModalVisible(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                       <Ionicons name="close" size={22} color={colors.text} />
                     </TouchableOpacity>
                   </View>
 
-                  <Text style={styles.inputLabel}>Period Title</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder="e.g. Period 1, Tea Break, Lab Session"
-                    placeholderTextColor={colors.inputPlaceholder}
-                    value={periodName}
-                    onChangeText={setPeriodName}
-                  />
+                  <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+                    <Text style={styles.inputLabel}>Period Title</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      placeholder="e.g. Period 1, Friday Assembly, Tea Break"
+                      placeholderTextColor={colors.inputPlaceholder}
+                      value={periodName}
+                      onChangeText={setPeriodName}
+                    />
 
-                  <View style={styles.timeInputRow}>
-                    <View style={{ flex: 1, marginRight: 8 }}>
-                      <Text style={styles.inputLabel}>Start Time (HH:mm)</Text>
-                      <TextInput
-                        style={styles.textInput}
-                        placeholder="09:00"
-                        placeholderTextColor={colors.inputPlaceholder}
-                        value={startTime}
-                        onChangeText={setStartTime}
-                        keyboardType="numbers-and-punctuation"
-                      />
+                    <View style={styles.timeInputRow}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={styles.inputLabel}>Start Time (HH:mm)</Text>
+                        <TextInput
+                          style={styles.textInput}
+                          placeholder="09:00"
+                          placeholderTextColor={colors.inputPlaceholder}
+                          value={startTime}
+                          onChangeText={setStartTime}
+                          keyboardType="numbers-and-punctuation"
+                        />
+                      </View>
+                      <View style={{ flex: 1, marginLeft: 8 }}>
+                        <Text style={styles.inputLabel}>End Time (HH:mm)</Text>
+                        <TextInput
+                          style={styles.textInput}
+                          placeholder="10:00"
+                          placeholderTextColor={colors.inputPlaceholder}
+                          value={endTime}
+                          onChangeText={setEndTime}
+                          keyboardType="numbers-and-punctuation"
+                        />
+                      </View>
                     </View>
-                    <View style={{ flex: 1, marginLeft: 8 }}>
-                      <Text style={styles.inputLabel}>End Time (HH:mm)</Text>
-                      <TextInput
-                        style={styles.textInput}
-                        placeholder="10:00"
-                        placeholderTextColor={colors.inputPlaceholder}
-                        value={endTime}
-                        onChangeText={setEndTime}
-                        keyboardType="numbers-and-punctuation"
-                      />
-                    </View>
-                  </View>
 
-                  <Text style={styles.inputLabel}>Period Type</Text>
-                  <View style={styles.typeSelectorRow}>
-                    {(['class', 'break', 'lunch', 'lab'] as const).map(t => (
+                    <Text style={styles.inputLabel}>Period Type</Text>
+                    <View style={styles.typeSelectorRow}>
+                      {(['class', 'break', 'lunch', 'lab'] as const).map(t => (
+                        <TouchableOpacity
+                          key={t}
+                          style={[styles.typePill, periodType === t && styles.typePillActive]}
+                          onPress={() => setPeriodType(t)}
+                        >
+                          <Text style={[styles.typePillText, periodType === t && styles.typePillTextActive]}>
+                            {t.toUpperCase()}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+
+                    {/* Customized Period Bell Chime Selector */}
+                    <View style={styles.modalSectionHeader}>
+                      <Text style={styles.inputLabel}>Period Bell Chime</Text>
+                      <Text style={styles.inputSubLabel}>Select unique tune to sound when this period ends</Text>
+                    </View>
+                    <View style={styles.modalChimeGrid}>
+                      {BELL_PATTERNS.map(pat => {
+                        const isSelected = periodBellPattern === pat.id;
+                        return (
+                          <TouchableOpacity
+                            key={pat.id}
+                            style={[styles.modalChimeCard, isSelected && styles.modalChimeCardActive]}
+                            onPress={() => setPeriodBellPattern(pat.id)}
+                            activeOpacity={0.7}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                              <Ionicons
+                                name={pat.icon as any}
+                                size={15}
+                                color={isSelected ? colors.primary : colors.textMuted}
+                              />
+                              <TouchableOpacity
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                onPress={async (e) => {
+                                  e.stopPropagation();
+                                  await triggerBellTest(pat.id);
+                                }}
+                                style={styles.chimePlayMini}
+                              >
+                                <Ionicons
+                                  name="play-circle"
+                                  size={16}
+                                  color={isSelected ? colors.primary : colors.textMuted}
+                                />
+                              </TouchableOpacity>
+                            </View>
+                            <Text
+                              style={[styles.modalChimeName, isSelected && styles.modalChimeNameActive]}
+                              numberOfLines={1}
+                            >
+                              {pat.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+
+                    {/* Applies to Days (e.g. Friday customization) */}
+                    <View style={[styles.modalSectionHeader, { marginTop: 14 }]}>
+                      <Text style={styles.inputLabel}>Applies to Days</Text>
+                      <Text style={styles.inputSubLabel}>Customize timing for Friday or specific days</Text>
+                    </View>
+
+                    {/* Quick Presets */}
+                    <View style={styles.quickPresetRow}>
                       <TouchableOpacity
-                        key={t}
-                        style={[styles.typePill, periodType === t && styles.typePillActive]}
-                        onPress={() => setPeriodType(t)}
+                        style={[styles.presetChip, periodDays.length === 0 && styles.presetChipActive]}
+                        onPress={() => setPeriodDays([])}
                       >
-                        <Text style={[styles.typePillText, periodType === t && styles.typePillTextActive]}>
-                          {t.toUpperCase()}
+                        <Text style={[styles.presetChipText, periodDays.length === 0 && styles.presetChipTextActive]}>
+                          All Active Days
                         </Text>
                       </TouchableOpacity>
-                    ))}
-                  </View>
+                      <TouchableOpacity
+                        style={[
+                          styles.presetChip,
+                          periodDays.length === 4 && periodDays.join(',') === '1,2,3,4' && styles.presetChipActive,
+                        ]}
+                        onPress={() => setPeriodDays([1, 2, 3, 4])}
+                      >
+                        <Text
+                          style={[
+                            styles.presetChipText,
+                            periodDays.length === 4 && periodDays.join(',') === '1,2,3,4' && styles.presetChipTextActive,
+                          ]}
+                        >
+                          Mon – Thu
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.presetChip,
+                          periodDays.length === 1 && periodDays[0] === 5 && styles.presetChipActive,
+                        ]}
+                        onPress={() => setPeriodDays([5])}
+                      >
+                        <Text
+                          style={[
+                            styles.presetChipText,
+                            periodDays.length === 1 && periodDays[0] === 5 && styles.presetChipTextActive,
+                          ]}
+                        >
+                          Friday Only
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Day Pills */}
+                    <View style={styles.modalDaysRow}>
+                      {DAYS.map(d => {
+                        const isIncluded = periodDays.length === 0
+                          ? activeConfig.activeDays.includes(d.day)
+                          : periodDays.includes(d.day);
+                        const isCustom = periodDays.length > 0 && periodDays.includes(d.day);
+
+                        return (
+                          <TouchableOpacity
+                            key={d.day}
+                            style={[
+                              styles.modalDayPill,
+                              isIncluded && styles.modalDayPillActive,
+                              isCustom && styles.modalDayPillCustom,
+                            ]}
+                            onPress={() => {
+                              let next = periodDays.length === 0 ? [...activeConfig.activeDays] : [...periodDays];
+                              if (next.includes(d.day)) {
+                                next = next.filter(x => x !== d.day);
+                              } else {
+                                next.push(d.day);
+                                next.sort((a, b) => a - b);
+                              }
+                              setPeriodDays(next);
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.modalDayPillText,
+                                isIncluded && styles.modalDayPillTextActive,
+                              ]}
+                            >
+                              {d.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+
+                    <View style={{ height: 16 }} />
+                  </ScrollView>
 
                   <View style={styles.modalBtnRow}>
                     <TouchableOpacity
@@ -555,6 +929,92 @@ export default function TimetableScreen() {
             </View>
           </TouchableWithoutFeedback>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Modal: Select Default Fallback Bell Tone */}
+      <Modal
+        visible={defaultToneModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDefaultToneModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setDefaultToneModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback onPress={e => e.stopPropagation()}>
+              <View style={styles.modalContent}>
+                <View style={styles.modalHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.modalTitle}>Default Period Chime</Text>
+                    <Text style={styles.modalSubtitle}>
+                      Fallback tone used when a period doesn't specify a custom chime
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setDefaultToneModalVisible(false)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="close" size={22} color={colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView style={{ maxHeight: 380, marginVertical: 8 }} showsVerticalScrollIndicator={false}>
+                  <View style={styles.modalChimeGrid}>
+                    {BELL_PATTERNS.map(pat => {
+                      const isSelected = activeConfig.defaultPattern === pat.id;
+                      return (
+                        <TouchableOpacity
+                          key={pat.id}
+                          style={[styles.modalChimeCard, isSelected && styles.modalChimeCardActive]}
+                          onPress={() => {
+                            handleSelectPattern(pat.id);
+                            setDefaultToneModalVisible(false);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                            <Ionicons
+                              name={pat.icon as any}
+                              size={15}
+                              color={isSelected ? colors.primary : colors.textMuted}
+                            />
+                            <TouchableOpacity
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              onPress={async (e) => {
+                                e.stopPropagation();
+                                await triggerBellTest(pat.id);
+                              }}
+                              style={styles.chimePlayMini}
+                            >
+                              <Ionicons
+                                name="play-circle"
+                                size={16}
+                                color={isSelected ? colors.primary : colors.textMuted}
+                              />
+                            </TouchableOpacity>
+                          </View>
+                          <Text
+                            style={[styles.modalChimeName, isSelected && styles.modalChimeNameActive]}
+                            numberOfLines={1}
+                          >
+                            {pat.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+
+                <TouchableOpacity
+                  style={styles.modalDoneBtn}
+                  onPress={() => setDefaultToneModalVisible(false)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.modalDoneBtnText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </View>
   );
@@ -590,9 +1050,6 @@ function getStyles(colors: any, isDark: boolean) {
     headerSubtitle: {
       color: colors.textMuted,
       fontSize: 12,
-    },
-    addIconButton: {
-      padding: 8,
     },
     scrollContent: {
       padding: Layout.spacing.md,
@@ -661,6 +1118,12 @@ function getStyles(colors: any, isDark: boolean) {
       color: colors.primary,
       fontSize: 12,
       fontWeight: '600',
+    },
+    countdownBadgePaused: {
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.04)',
+    },
+    countdownTextPaused: {
+      color: colors.textMuted,
     },
     idlePeriodInfo: {
       gap: 4,
@@ -741,76 +1204,246 @@ function getStyles(colors: any, isDark: boolean) {
       color: isDark ? '#000000' : '#FFFFFF',
       fontWeight: '700',
     },
-    patternHeaderRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 8,
-    },
-    testBellBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: Layout.radius.sm,
-      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.12)' : 'rgba(217, 119, 6, 0.1)',
-    },
-    testBellBtnText: {
-      color: colors.primary,
-      fontSize: 12,
-      fontWeight: '600',
-    },
-    patternGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-    },
-    patternCard: {
-      width: '48%',
+    defaultToneCard: {
       backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : colors.cardSecondary,
       borderRadius: Layout.radius.md,
-      padding: 12,
       borderWidth: 1,
       borderColor: colors.surfaceBorder,
-      gap: 4,
+      padding: 12,
+      gap: 10,
     },
-    patternCardActive: {
-      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.08)' : 'rgba(217, 119, 6, 0.08)',
-      borderColor: colors.primary,
+    defaultToneHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
     },
-    patternName: {
+    defaultToneLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      flex: 1,
+    },
+    defaultToneIconBox: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.15)' : 'rgba(217, 119, 6, 0.12)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    defaultToneInfo: {
+      flex: 1,
+    },
+    defaultToneTitle: {
       color: colors.text,
       fontSize: 13,
-      fontWeight: '600',
+      fontWeight: '700',
     },
-    patternNameActive: {
-      color: colors.primary,
-    },
-    patternDesc: {
+    defaultToneSub: {
       color: colors.textMuted,
       fontSize: 11,
+      marginTop: 2,
+    },
+    defaultToneRightActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      flexShrink: 0,
+    },
+    defaultToneChangePill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.12)' : 'rgba(217, 119, 6, 0.1)',
+      paddingHorizontal: 9,
+      paddingVertical: 6,
+      borderRadius: Layout.radius.sm,
+    },
+    defaultToneChangeText: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    testBuzzerBtnCompact: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: Layout.radius.sm,
+      backgroundColor: colors.primary,
+    },
+    testBuzzerBtnActive: {
+      opacity: 0.75,
+    },
+    testBuzzerBtnText: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontSize: 11,
+      fontWeight: '700',
     },
     scheduleHeaderRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: 12,
+      marginBottom: 10,
     },
     scheduleSectionTitle: {
       color: colors.text,
       fontSize: 16,
       fontWeight: '700',
     },
+    scheduleSubtitle: {
+      color: colors.textMuted,
+      fontSize: 12,
+      marginTop: 2,
+    },
     addTextBtn: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: Layout.radius.sm,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.12)' : 'rgba(217, 119, 6, 0.1)',
     },
     addTextBtnLabel: {
       color: colors.primary,
-      fontSize: 13,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    dayFilterContainer: {
+      marginBottom: 12,
+    },
+    dayFilterScroll: {
+      gap: 6,
+      paddingVertical: 2,
+    },
+    dayFilterTab: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      borderRadius: 20,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      gap: 6,
+    },
+    dayFilterTabActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    dayFilterTabInactive: {
+      opacity: 0.6,
+    },
+    dayFilterTabText: {
+      color: colors.textMuted,
+      fontSize: 12,
       fontWeight: '600',
+    },
+    dayFilterTabTextActive: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontWeight: '700',
+    },
+    dayCountBadge: {
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)',
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+      borderRadius: 10,
+    },
+    dayCountBadgeActive: {
+      backgroundColor: isDark ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.25)',
+    },
+    dayCountText: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    dayCountTextActive: {
+      color: isDark ? '#000000' : '#FFFFFF',
+    },
+    todayDot: {
+      width: 5,
+      height: 5,
+      borderRadius: 2.5,
+      backgroundColor: colors.primary,
+    },
+    dayBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.08)' : 'rgba(217, 119, 6, 0.06)',
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(253, 168, 58, 0.2)' : 'rgba(217, 119, 6, 0.15)',
+      borderRadius: Layout.radius.md,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginBottom: 12,
+      gap: 8,
+    },
+    dayBannerTitle: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    dayBannerSub: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    duplicateBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: Layout.radius.sm,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.15)' : 'rgba(217, 119, 6, 0.12)',
+    },
+    duplicateBtnText: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    emptyDayBox: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 32,
+      paddingHorizontal: 20,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.02)' : colors.cardSecondary,
+      borderRadius: Layout.radius.lg,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      borderStyle: 'dashed',
+      marginBottom: 16,
+      gap: 6,
+    },
+    emptyDayTitle: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '700',
+      marginTop: 4,
+    },
+    emptyDaySub: {
+      color: colors.textMuted,
+      fontSize: 12,
+      textAlign: 'center',
+    },
+    emptyAddBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: colors.primary,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: Layout.radius.md,
+      marginTop: 10,
+    },
+    emptyAddBtnText: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontSize: 12,
+      fontWeight: '700',
     },
     periodCard: {
       flexDirection: 'row',
@@ -841,11 +1474,13 @@ function getStyles(colors: any, isDark: boolean) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
+      flex: 1,
     },
     periodNameText: {
       color: colors.text,
       fontSize: 15,
       fontWeight: '600',
+      flexShrink: 1,
     },
     typeBadge: {
       borderWidth: 1,
@@ -861,10 +1496,11 @@ function getStyles(colors: any, isDark: boolean) {
     textDisabled: {
       color: colors.textMuted,
     },
-    periodBottomRow: {
+    periodMetaRow: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
       alignItems: 'center',
+      gap: 12,
+      flexWrap: 'wrap',
     },
     timeTag: {
       flexDirection: 'row',
@@ -875,6 +1511,52 @@ function getStyles(colors: any, isDark: boolean) {
       color: colors.textMuted,
       fontSize: 12,
       fontVariant: ['tabular-nums'],
+    },
+    dayTag: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.04)',
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 10,
+    },
+    dayTagCustom: {
+      backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(220, 38, 38, 0.1)',
+      borderWidth: 0.5,
+      borderColor: isDark ? 'rgba(239, 68, 68, 0.3)' : 'rgba(220, 38, 38, 0.25)',
+    },
+    dayTagText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '500',
+    },
+    dayTagTextCustom: {
+      color: isDark ? '#FCA5A5' : '#DC2626',
+      fontWeight: '700',
+    },
+    periodBottomRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginTop: 2,
+    },
+    chimeBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.1)' : 'rgba(217, 119, 6, 0.08)',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: Layout.radius.sm,
+      borderWidth: 0.5,
+      borderColor: isDark ? 'rgba(253, 168, 58, 0.25)' : 'rgba(217, 119, 6, 0.2)',
+      maxWidth: '75%',
+    },
+    chimeBadgeText: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: '600',
     },
     periodActions: {
       flexDirection: 'row',
@@ -889,11 +1571,11 @@ function getStyles(colors: any, isDark: boolean) {
       backgroundColor: colors.modalOverlay,
       justifyContent: 'center',
       alignItems: 'center',
-      padding: 20,
+      padding: 16,
     },
     modalDismissArea: {
       width: '100%',
-      maxWidth: 440,
+      maxWidth: 480,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -904,24 +1586,39 @@ function getStyles(colors: any, isDark: boolean) {
       padding: 20,
       borderWidth: 1,
       borderColor: colors.surfaceBorder,
+      maxHeight: '90%',
     },
     modalHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 16,
+      alignItems: 'flex-start',
+      marginBottom: 14,
     },
     modalTitle: {
       color: colors.text,
       fontSize: 18,
       fontWeight: '700',
     },
+    modalSubtitle: {
+      color: colors.textMuted,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    modalScroll: {
+      maxHeight: 460,
+    },
     inputLabel: {
       color: colors.textMuted,
       fontSize: 12,
       fontWeight: '600',
-      marginBottom: 6,
+      marginBottom: 4,
       textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    inputSubLabel: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginBottom: 8,
     },
     textInput: {
       backgroundColor: colors.inputBackground,
@@ -931,7 +1628,7 @@ function getStyles(colors: any, isDark: boolean) {
       fontSize: 14,
       borderWidth: 1,
       borderColor: colors.inputBorder,
-      marginBottom: 14,
+      marginBottom: 12,
     },
     timeInputRow: {
       flexDirection: 'row',
@@ -940,7 +1637,7 @@ function getStyles(colors: any, isDark: boolean) {
     typeSelectorRow: {
       flexDirection: 'row',
       gap: 8,
-      marginBottom: 20,
+      marginBottom: 16,
     },
     typePill: {
       flex: 1,
@@ -964,9 +1661,103 @@ function getStyles(colors: any, isDark: boolean) {
       color: colors.primary,
       fontWeight: '700',
     },
+    modalSectionHeader: {
+      marginBottom: 4,
+    },
+    modalChimeGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+      marginBottom: 12,
+    },
+    modalChimeCard: {
+      width: '48.5%',
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : colors.cardSecondary,
+      borderRadius: Layout.radius.md,
+      padding: 10,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      gap: 3,
+    },
+    modalChimeCardActive: {
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.1)' : 'rgba(217, 119, 6, 0.1)',
+      borderColor: colors.primary,
+    },
+    modalChimeName: {
+      color: colors.text,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    modalChimeNameActive: {
+      color: colors.primary,
+    },
+    chimePlayMini: {
+      padding: 2,
+    },
+    quickPresetRow: {
+      flexDirection: 'row',
+      gap: 6,
+      marginBottom: 8,
+    },
+    presetChip: {
+      flex: 1,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      borderRadius: Layout.radius.sm,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      alignItems: 'center',
+    },
+    presetChipActive: {
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.15)' : 'rgba(217, 119, 6, 0.12)',
+      borderColor: colors.primary,
+    },
+    presetChipText: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: '600',
+    },
+    presetChipTextActive: {
+      color: colors.primary,
+      fontWeight: '700',
+    },
+    modalDaysRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginBottom: 12,
+    },
+    modalDayPill: {
+      width: 36,
+      height: 32,
+      borderRadius: Layout.radius.sm,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modalDayPillActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    modalDayPillCustom: {
+      backgroundColor: isDark ? '#DC2626' : '#EF4444',
+      borderColor: isDark ? '#DC2626' : '#EF4444',
+    },
+    modalDayPillText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    modalDayPillTextActive: {
+      color: '#FFFFFF',
+      fontWeight: '700',
+    },
     modalBtnRow: {
       flexDirection: 'row',
       gap: 10,
+      marginTop: 8,
     },
     modalCancelBtn: {
       flex: 1,
@@ -988,6 +1779,20 @@ function getStyles(colors: any, isDark: boolean) {
       alignItems: 'center',
     },
     modalSaveBtnText: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    modalDoneBtn: {
+      width: '100%',
+      paddingVertical: 12,
+      borderRadius: Layout.radius.md,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 8,
+    },
+    modalDoneBtnText: {
       color: isDark ? '#000000' : '#FFFFFF',
       fontSize: 14,
       fontWeight: '700',
