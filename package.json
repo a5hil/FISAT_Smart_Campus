@@ -13,6 +13,7 @@
     "expo-blur": "~57.0.3",
     "expo-constants": "~57.0.19",
     "expo-linking": "^57.0.9",
+    "expo-navigation-bar": "~57.0.3",
     "expo-router": "~57.0.22",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",

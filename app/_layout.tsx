@@ -1,5 +1,8 @@
+import React, { useEffect } from 'react';
+import { Platform, StatusBar as RNStatusBar } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { NavigationBar } from 'expo-navigation-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { AppProvider, useApp } from '../context/AppContext';
@@ -14,9 +17,18 @@ function ToastRenderer() {
 function AppContent() {
   const { colors, isDark } = useApp();
 
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      RNStatusBar.setBackgroundColor(colors.background, true);
+      NavigationBar.setStyle(isDark ? 'dark' : 'light');
+    }
+    RNStatusBar.setBarStyle(isDark ? 'light-content' : 'dark-content', true);
+  }, [isDark, colors.background]);
+
   return (
     <SafeAreaProvider style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
+      <NavigationBar style={isDark ? 'dark' : 'light'} />
       <Stack
         screenOptions={{
           headerShown: false,
