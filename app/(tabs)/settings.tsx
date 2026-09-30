@@ -17,6 +17,7 @@ export default function SettingsScreen() {
     esp32Connected,
     esp32Telemetry,
     updateEsp32WiFi,
+    logoutUser,
     colors,
     isDark,
     themeMode,
@@ -59,13 +60,20 @@ export default function SettingsScreen() {
       <ScreenHeader title="Settings & Hardware" />
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* User Card */}
+        {/* User Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{user.initials}</Text>
           </View>
           <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>{user.name}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Text style={styles.profileName}>{user.name}</Text>
+              {user.username ? (
+                <View style={[styles.usernameBadge, { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(217, 119, 6, 0.12)' }]}>
+                  <Text style={[styles.usernameBadgeText, { color: colors.primary }]}>@{user.username}</Text>
+                </View>
+              ) : null}
+            </View>
             <Text style={styles.profileRole}>{user.role}</Text>
             <Text style={styles.profileEmail}>{user.email}</Text>
           </View>
@@ -205,6 +213,32 @@ export default function SettingsScreen() {
             </View>
           </View>
         </View>
+
+        {/* Account Actions / Sign Out */}
+        <TouchableOpacity
+          style={styles.signOutButton}
+          activeOpacity={0.8}
+          onPress={() => {
+            RNAlert.alert(
+              'Sign Out',
+              'Are you sure you want to sign out of this account?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Sign Out',
+                  style: 'destructive',
+                  onPress: async () => {
+                    await logoutUser();
+                    router.replace('/sign-in' as any);
+                  },
+                },
+              ]
+            );
+          }}
+        >
+          <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+          <Text style={styles.signOutText}>Sign Out of Account</Text>
+        </TouchableOpacity>
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -346,6 +380,15 @@ const getStyles = (colors: ThemeColors, isDark: boolean) =>
       fontSize: 16,
       fontWeight: '700',
     },
+    usernameBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 10,
+    },
+    usernameBadgeText: {
+      fontSize: 11,
+      fontWeight: '700',
+    },
     profileRole: {
       color: colors.primary,
       fontSize: 13,
@@ -356,6 +399,24 @@ const getStyles = (colors: ThemeColors, isDark: boolean) =>
       color: colors.textSecondary,
       fontSize: 12,
       marginTop: 2,
+    },
+    signOutButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.08)',
+      borderColor: 'rgba(239, 68, 68, 0.3)',
+      borderWidth: 1,
+      borderRadius: Layout.radius.lg,
+      paddingVertical: 14,
+      marginTop: 4,
+      marginBottom: 20,
+    },
+    signOutText: {
+      color: '#EF4444',
+      fontSize: 15,
+      fontWeight: '600',
     },
     section: {
       marginBottom: 20,

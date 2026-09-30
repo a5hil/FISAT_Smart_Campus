@@ -134,10 +134,13 @@ export interface EnergyReading {
 }
 
 export interface User {
+  id?: string;
   name: string;
+  username?: string;
   initials: string;
   role: string;
   email: string;
+  department?: string;
 }
 
 export interface Campus {

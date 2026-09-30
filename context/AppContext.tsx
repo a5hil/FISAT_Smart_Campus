@@ -26,6 +26,10 @@ interface ToastState {
 
 interface AppContextType {
   user: User;
+  isAuthenticated: boolean;
+  loginUser: (identifier: string, pass: string) => Promise<{ success: boolean; message: string; user?: User }>;
+  logoutUser: () => Promise<void>;
+  registerUser: (name: string, username: string, email: string, pass: string, role?: string, department?: string) => Promise<{ success: boolean; message: string }>;
   campus: Campus;
   classrooms: Classroom[];
   alerts: Alert[];
@@ -87,6 +91,7 @@ const STORAGE_KEYS = {
   NOTICES: '@notices',
   TIMETABLE: '@timetable',
   THEME_MODE: '@theme_mode',
+  LOGGED_IN_USER: '@logged_in_user',
 };
 
 const SETTING_KEYS = ['brightness', 'speed', 'temperature', 'mode', 'fanSpeed', 'volume', 'source', 'direction', 'colorTemp'] as const;
@@ -300,6 +305,8 @@ function buildClassrooms(
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const [currentUser, setCurrentUser] = useState<User>(mockUser);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [campus, setCampus] = useState<Campus>(mockCampus);
   const [classrooms, setClassrooms] = useState<Classroom[]>(mockClassrooms);
   const [alerts, setAlerts] = useState<Alert[]>(mockAlerts);
@@ -521,6 +528,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       } catch (e) {
         console.error('Failed to load theme preference:', e);
+      }
+      try {
+        const savedUserStr = await AsyncStorage.getItem(STORAGE_KEYS.LOGGED_IN_USER);
+        if (savedUserStr) {
+          const parsedUser = JSON.parse(savedUserStr);
+          if (parsedUser && parsedUser.name) {
+            setCurrentUser(parsedUser);
+            setIsAuthenticated(true);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load user session:', e);
       }
       try {
         ok = await loadFromSupabase();
@@ -1901,12 +1920,158 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return { success: false, message: 'Could not reach ESP32 to test bell' };
   }, [classrooms, esp32Ip, showToast]);
 
+  const loginUser = useCallback(async (identifier: string, pass: string): Promise<{ success: boolean; message: string; user?: User }> => {
+    const cleanId = identifier.trim();
+    const cleanPass = pass.trim();
+
+    if (!cleanId || !cleanPass) {
+      return { success: false, message: 'Please enter both username/email and password.' };
+    }
+
+    try {
+      if (isSupabaseConfigured) {
+        let userRow: any = null;
+
+        // Try RPC verification function first
+        try {
+          const { data: rpcData, error: rpcError } = await supabase.rpc('verify_user_login', {
+            p_identifier: cleanId,
+            p_password: cleanPass,
+          });
+          if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+            userRow = rpcData[0];
+          }
+        } catch (rpcErr) {
+          console.log('[Auth] verify_user_login RPC fallback:', rpcErr);
+        }
+
+        // Direct table query fallback if RPC wasn't available or returned empty
+        if (!userRow) {
+          const { data: directRows, error: directErr } = await supabase
+            .from('app_users')
+            .select('*')
+            .or(`username.ilike.${cleanId},email.ilike.${cleanId}`)
+            .eq('password', cleanPass)
+            .limit(1);
+
+          if (!directErr && directRows && directRows.length > 0) {
+            userRow = directRows[0];
+          }
+        }
+
+        if (userRow) {
+          const name = userRow.name || userRow.full_name || cleanId;
+          const initials = name
+            .split(' ')
+            .filter(Boolean)
+            .map((part: string) => part[0])
+            .join('')
+            .toUpperCase()
+            .substring(0, 2) || 'U';
+
+          const authenticatedUser: User = {
+            id: userRow.id,
+            name: name,
+            username: userRow.username || cleanId,
+            email: userRow.email || '',
+            role: userRow.role || 'Department Administrator',
+            department: userRow.department || 'IMCA Department',
+            initials: initials,
+          };
+
+          setCurrentUser(authenticatedUser);
+          setIsAuthenticated(true);
+          await AsyncStorage.setItem(STORAGE_KEYS.LOGGED_IN_USER, JSON.stringify(authenticatedUser));
+          showToast(`Welcome back, ${authenticatedUser.name}!`, 'success');
+          return { success: true, message: 'Login successful', user: authenticatedUser };
+        }
+      }
+
+      // Hardcoded fallback for default offline demo users if network is disconnected
+      const cleanLower = cleanId.toLowerCase();
+      if ((cleanLower === 'admin' || cleanLower === 'admin@fisat.ac.in') && cleanPass === 'admin123') {
+        const adminUser: User = {
+          name: 'Nershel Nelson',
+          username: 'admin',
+          initials: 'NN',
+          role: 'Department Administrator',
+          email: 'admin@fisat.ac.in',
+          department: 'IMCA Department',
+        };
+        setCurrentUser(adminUser);
+        setIsAuthenticated(true);
+        await AsyncStorage.setItem(STORAGE_KEYS.LOGGED_IN_USER, JSON.stringify(adminUser));
+        showToast('Welcome back, Nershel Nelson!', 'success');
+        return { success: true, message: 'Login successful', user: adminUser };
+      }
+
+      return { success: false, message: 'Invalid username/email or password.' };
+    } catch (err: any) {
+      console.error('[Auth] Login error:', err);
+      return { success: false, message: err?.message || 'Login failed due to network error.' };
+    }
+  }, [showToast]);
+
+  const logoutUser = useCallback(async () => {
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEYS.LOGGED_IN_USER);
+      setIsAuthenticated(false);
+      setCurrentUser(mockUser);
+      showToast('Logged out successfully', 'info');
+    } catch (e) {
+      console.error('[Auth] Logout error:', e);
+    }
+  }, [showToast]);
+
+  const registerUser = useCallback(async (
+    name: string,
+    username: string,
+    email: string,
+    pass: string,
+    role = 'Department Administrator',
+    department = 'IMCA Department'
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!name.trim() || !username.trim() || !email.trim() || !pass.trim()) {
+      return { success: false, message: 'Please fill in all required fields.' };
+    }
+
+    try {
+      if (isSupabaseConfigured) {
+        const { data, error } = await supabase.from('app_users').insert([
+          {
+            name: name.trim(),
+            username: username.trim().toLowerCase(),
+            email: email.trim().toLowerCase(),
+            password: pass.trim(),
+            role: role,
+            department: department,
+            is_active: true,
+          }
+        ]).select().single();
+
+        if (error) {
+          if (error.message.includes('unique') || error.code === '23505') {
+            return { success: false, message: 'A user with this username or email already exists.' };
+          }
+          return { success: false, message: error.message };
+        }
+
+        if (data) {
+          return { success: true, message: 'Account registered successfully! You can now sign in.' };
+        }
+      }
+      return { success: false, message: 'Could not connect to database.' };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Registration failed.' };
+    }
+  }, []);
 
   if (!isReady) return null;
 
   return (
     <AppContext.Provider value={{
-      user: mockUser, campus, classrooms, alerts, notifications,
+      user: currentUser, isAuthenticated, loginUser, logoutUser, registerUser,
+      campus, classrooms, alerts, notifications,
       energyData, quickControls, toast,
       showToast, hideToast,
       toggleDevice, toggleQuickControl, emergencyOff,

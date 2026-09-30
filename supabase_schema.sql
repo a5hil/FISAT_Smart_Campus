@@ -1,33 +1,89 @@
--- Enable UUID generation if not already enabled
+-- Enable UUID generation and pgcrypto
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- =================================================================================
--- 1. AUTHENTICATION / USERS TABLE
+-- 1. AUTHENTICATION / USERS TABLE & CREDENTIALS VERIFICATION
 -- =================================================================================
--- NOTE: In a real Supabase app, you should use the built-in `auth.users` table
--- provided by Supabase Auth for secure password hashing and JWTs. 
--- However, as requested, here is a custom table to store and check login data manually.
 
-CREATE TABLE IF NOT EXISTS public.app_users (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+-- Drop legacy table if it was created with old column structure
+DROP TABLE IF EXISTS public.app_users CASCADE;
+
+CREATE TABLE public.app_users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  username TEXT UNIQUE NOT NULL,
   email TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL, -- Store hashed passwords (e.g., bcrypt), never plain text!
-  full_name TEXT NOT NULL,
-  role TEXT DEFAULT 'admin',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  password TEXT NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT DEFAULT 'Department Administrator',
+  department TEXT DEFAULT 'IMCA Department',
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Example function to "check" login data (For reference/mocking only)
--- Usage: SELECT * FROM check_login('admin@college.edu', 'hashed_password_here');
-CREATE OR REPLACE FUNCTION check_login(check_email TEXT, check_password TEXT)
-RETURNS SETOF public.app_users AS $$
+CREATE INDEX idx_app_users_username ON public.app_users (LOWER(username));
+CREATE INDEX idx_app_users_email ON public.app_users (LOWER(email));
+
+ALTER TABLE public.app_users ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow anon read access for login" ON public.app_users;
+CREATE POLICY "Allow anon read access for login" ON public.app_users FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Allow anon insert for signup" ON public.app_users;
+CREATE POLICY "Allow anon insert for signup" ON public.app_users FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow anon update" ON public.app_users;
+CREATE POLICY "Allow anon update" ON public.app_users FOR UPDATE USING (true);
+
+-- RPC Function to verify login with either username or email
+CREATE OR REPLACE FUNCTION verify_user_login(p_identifier TEXT, p_password TEXT)
+RETURNS TABLE (
+  id UUID,
+  username TEXT,
+  email TEXT,
+  name TEXT,
+  role TEXT,
+  department TEXT,
+  created_at TIMESTAMP WITH TIME ZONE
+) 
+SECURITY DEFINER
+AS $$
 BEGIN
-  RETURN QUERY 
-  SELECT * FROM public.app_users 
-  WHERE email = check_email AND password_hash = check_password
+  RETURN QUERY
+  SELECT 
+    u.id,
+    u.username,
+    u.email,
+    u.name,
+    u.role,
+    u.department,
+    u.created_at
+  FROM public.app_users u
+  WHERE (LOWER(u.username) = LOWER(TRIM(p_identifier)) OR LOWER(u.email) = LOWER(TRIM(p_identifier)))
+    AND u.password = p_password
+    AND u.is_active = true
   LIMIT 1;
 END;
 $$ LANGUAGE plpgsql;
+
+GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated, service_role;
+
+-- Seed default demo users
+INSERT INTO public.app_users (username, email, password, name, role, department, is_active)
+VALUES 
+  ('admin', 'admin@fisat.ac.in', 'admin123', 'Nershel Nelson', 'Department Administrator', 'IMCA Department', true),
+  ('faculty', 'faculty@fisat.ac.in', 'faculty123', 'Dr. Arun Kumar', 'Associate Professor', 'Computer Applications', true),
+  ('labincharge', 'lab@fisat.ac.in', 'lab123', 'Priya Varghese', 'Lab Technical Officer', 'IoT & Embedded Systems Lab', true),
+  ('student', 'student@fisat.ac.in', 'student123', 'Rahul S', 'Student Representative', 'MCA Semester 4', true)
+ON CONFLICT (username) DO UPDATE 
+SET 
+  email = EXCLUDED.email,
+  password = EXCLUDED.password,
+  name = EXCLUDED.name,
+  role = EXCLUDED.role,
+  department = EXCLUDED.department,
+  updated_at = NOW();
 
 
 -- =================================================================================
