@@ -40,7 +40,11 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
     }
   };
 
+  const isRgb = device.id.includes('rgb') || device.id.includes('strip') || Boolean(device.capabilities?.color);
+  const activeColor = device.color || '#FF6B00';
+
   const getIcon = () => {
+    if (isRgb) return 'color-palette-outline';
     if (device.id.includes('notice') || device.name.toLowerCase().includes('notice')) return 'easel-outline';
     if (device.id.includes('screen') || device.name.toLowerCase().includes('screen')) return 'desktop-outline';
     switch (device.category) {
@@ -56,6 +60,9 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
   const getStatusText = () => {
     if (isOffline) return 'Offline';
     if (isCurtain) return isOn ? 'Open (90°)' : 'Closed';
+    if (isRgb) {
+      return isOn ? `On • ${activeColor} • ${device.brightness ?? 80}%` : 'Off';
+    }
     const isDisplay = device.id.includes('notice') || device.id.includes('screen') || device.category === 'smart-board' || device.category === 'display';
     if (isDisplay) {
       return isOn ? 'Active • Display ON' : 'Standby • Display OFF';
@@ -64,13 +71,17 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
     return isOn ? `On • ${device.powerUsage || rating}W` : `Off • ${rating}W`;
   };
 
+  const cardBorderColor = isOn && !isOffline 
+    ? (isRgb ? activeColor : colors.primary) 
+    : colors.surfaceBorder;
+
   return (
     <TouchableOpacity 
       style={[
         styles.card,
         {
-          backgroundColor: isOn && !isOffline ? colors.primarySubtle : colors.card,
-          borderColor: isOn && !isOffline ? colors.primary : colors.surfaceBorder,
+          backgroundColor: isOn && !isOffline ? (isRgb ? `${activeColor}18` : colors.primarySubtle) : colors.card,
+          borderColor: cardBorderColor,
         },
         isOffline && styles.cardOffline
       ]}
@@ -84,14 +95,14 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
           styles.iconContainer,
           {
             backgroundColor: isOn && !isOffline
-              ? colors.primarySubtle
+              ? (isRgb ? `${activeColor}28` : colors.primarySubtle)
               : (isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)'),
           },
         ]}>
           <Ionicons 
             name={getIcon() as any} 
             size={20} 
-            color={isOffline ? colors.textMuted : isOn ? colors.primary : colors.text} 
+            color={isOffline ? colors.textMuted : isOn ? (isRgb ? activeColor : colors.primary) : colors.text} 
           />
         </View>
 
@@ -100,7 +111,7 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
             value={isOn}
             onValueChange={handleTilePress}
             disabled={isOffline}
-            trackColor={{ false: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)', true: colors.primary }}
+            trackColor={{ false: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)', true: isRgb ? activeColor : colors.primary }}
             thumbColor={isOn ? '#FFFFFF' : (isDark ? '#D1D5DB' : '#FFFFFF')}
             style={{ 
               transform: [{ scale: Platform.OS === 'ios' ? 0.95 : 1.15 }] 
@@ -115,9 +126,14 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
           <Text style={[styles.name, { color: isOffline ? colors.textMuted : colors.text }]} numberOfLines={1}>
             {device.name}
           </Text>
-          <Text style={[styles.status, { color: colors.textSecondary }]}>
-            {getStatusText()}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+            {isRgb && isOn && (
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: activeColor, marginRight: 6 }} />
+            )}
+            <Text style={[styles.status, { color: colors.textSecondary }]} numberOfLines={1}>
+              {getStatusText()}
+            </Text>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -127,7 +143,7 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
               backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)',
               borderColor: colors.surfaceBorder,
             },
-            isOn && !isOffline && { borderColor: colors.primary, backgroundColor: colors.primarySubtle }
+            isOn && !isOffline && { borderColor: isRgb ? activeColor : colors.primary, backgroundColor: isRgb ? `${activeColor}20` : colors.primarySubtle }
           ]}
           onPress={(e) => {
             e.stopPropagation?.();
@@ -137,9 +153,9 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
           accessibilityLabel="Device Details"
         >
           <Ionicons 
-            name="settings-outline" 
+            name={isRgb ? "color-filter-outline" : "settings-outline"} 
             size={14} 
-            color={isOn && !isOffline ? colors.primary : colors.textMuted} 
+            color={isOn && !isOffline ? (isRgb ? activeColor : colors.primary) : colors.textMuted} 
           />
         </TouchableOpacity>
       </View>

@@ -20,6 +20,7 @@
 #include "soc/soc.h"
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
@@ -44,6 +45,7 @@ WebServer server(WEB_SERVER_PORT);
 DNSServer dnsServer;
 const byte DNS_PORT = 53;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET_PIN);
+Adafruit_NeoPixel strip(WS2812_NUM_LEDS, WS2812_PIN, NEO_GRB + NEO_KHZ800);
 
 // --- Secondary Hardware I2C Bus (Wire1) for Classroom Notice Board OLED ---
 // Uses GPIO 13 (SDA) and GPIO 15 (SCL) - No soldering or SMD cutting needed!
@@ -594,6 +596,15 @@ bool servo2_attached = false;
 volatile bool state_corr1_light = false;
 volatile bool state_corr2_light = false;
 
+// WS2812B Addressable LED Strip State (Corridor Zone, 15 LEDs, GPIO 5)
+volatile bool state_ws2812 = false;
+String ws2812_color = WS2812_DEFAULT_COLOR;
+int ws2812_brightness = WS2812_DEFAULT_BRIGHTNESS; // 0-255
+String ws2812_mode = "solid";                      // "solid", "breathe", "rainbow", "strobe"
+unsigned long last_ws2812_anim_ms = 0;
+uint16_t ws2812_anim_step = 0;
+bool ws2812_strobe_state = false;
+
 // Display States for Classroom 1 (A101)
 volatile bool state_c1_smart_screen = true;   // Primary OLED (Telemetry Display on Wire)
 volatile bool state_c1_notice_screen = true;  // Secondary OLED (Notice Board on Wire1)
@@ -611,6 +622,7 @@ bool cloud_prev_c2_fan = false;
 bool cloud_prev_c2_curtain = false;
 bool cloud_prev_corr1_light = false;
 bool cloud_prev_corr2_light = false;
+bool cloud_prev_ws2812 = false;
 bool cloud_prev_system_auto = false;
 volatile bool pendingModeCloudSync = false;
 volatile bool pendingIpCloudSync = true;
@@ -744,6 +756,7 @@ float rated_c2_light = WATTS_CLASS_LIGHT;
 float rated_c2_fan = WATTS_CLASS_FAN;
 float rated_corr1 = WATTS_CORR_LIGHT;
 float rated_corr2 = WATTS_CORR_LIGHT;
+float rated_ws2812 = WATTS_WS2812_STRIP;
 
 float getC1LoadWatts() {
   // If physical ACS712/ZMPT101B detects real active power, use measured value
@@ -778,6 +791,8 @@ float getTotalLoadWatts() {
     w += rated_corr1;
   if (state_corr2_light)
     w += rated_corr2;
+  if (state_ws2812)
+    w += (rated_ws2812 * (ws2812_brightness / 255.0f));
   return w;
 }
 
@@ -787,6 +802,8 @@ float getCorrLoadWatts() {
     w += rated_corr1;
   if (state_corr2_light)
     w += rated_corr2;
+  if (state_ws2812)
+    w += (rated_ws2812 * (ws2812_brightness / 255.0f));
   return w;
 }
 
@@ -982,6 +999,150 @@ void applyRelayStates() {
 }
 
 // ==========================================
+// --- WS2812B 15-LED STRIP CONTROLLER ---
+// ==========================================
+uint32_t parseHexColor(const String &hexStr) {
+  String h = hexStr;
+  h.replace("#", "");
+  h.trim();
+  if (h.length() != 6) {
+    return strip.Color(255, 107, 0); // fallback warm amber
+  }
+  long number = strtol(h.c_str(), NULL, 16);
+  long r = (number >> 16) & 0xFF;
+  long g = (number >> 8) & 0xFF;
+  long b = number & 0xFF;
+  return strip.Color((uint8_t)r, (uint8_t)g, (uint8_t)b);
+}
+
+void updateWs2812Strip() {
+  if (!state_ws2812) {
+    strip.clear();
+    strip.show();
+    return;
+  }
+
+  strip.setBrightness(ws2812_brightness);
+
+  if (ws2812_mode == "rainbow" || ws2812_mode == "breathe" || ws2812_mode == "strobe") {
+    // Handled dynamically in updateWs2812Animation()
+    return;
+  }
+
+  // Default: Solid Color
+  uint32_t c = parseHexColor(ws2812_color);
+  for (int i = 0; i < WS2812_NUM_LEDS; i++) {
+    strip.setPixelColor(i, c);
+  }
+  strip.show();
+}
+
+void updateWs2812Animation() {
+  if (!state_ws2812) return;
+
+  unsigned long now = millis();
+
+  if (ws2812_mode == "breathe") {
+    if (now - last_ws2812_anim_ms >= 25) {
+      last_ws2812_anim_ms = now;
+      ws2812_anim_step = (ws2812_anim_step + 4) % 360;
+      float rad = ws2812_anim_step * (3.14159265f / 180.0f);
+      float factor = 0.25f + 0.75f * (0.5f + 0.5f * sin(rad));
+      int effB = (int)(ws2812_brightness * factor);
+      strip.setBrightness(constrain(effB, 10, 255));
+      uint32_t c = parseHexColor(ws2812_color);
+      for (int i = 0; i < WS2812_NUM_LEDS; i++) {
+        strip.setPixelColor(i, c);
+      }
+      strip.show();
+    }
+  } else if (ws2812_mode == "rainbow") {
+    if (now - last_ws2812_anim_ms >= 25) {
+      last_ws2812_anim_ms = now;
+      ws2812_anim_step = (ws2812_anim_step + 256) % 65536;
+      strip.setBrightness(ws2812_brightness);
+      for (int i = 0; i < WS2812_NUM_LEDS; i++) {
+        int pixelHue = (ws2812_anim_step + (i * 65536L / WS2812_NUM_LEDS)) % 65536;
+        strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue)));
+      }
+      strip.show();
+    }
+  } else if (ws2812_mode == "strobe") {
+    if (now - last_ws2812_anim_ms >= 200) {
+      last_ws2812_anim_ms = now;
+      ws2812_strobe_state = !ws2812_strobe_state;
+      strip.setBrightness(ws2812_brightness);
+      if (ws2812_strobe_state) {
+        uint32_t c = parseHexColor(ws2812_color);
+        for (int i = 0; i < WS2812_NUM_LEDS; i++) {
+          strip.setPixelColor(i, c);
+        }
+      } else {
+        strip.clear();
+      }
+      strip.show();
+    }
+  }
+}
+
+void handleApiRgb() {
+  enableCORS();
+  if (server.method() == HTTP_OPTIONS) {
+    server.send(204);
+    return;
+  }
+
+  if (server.hasArg("state") || server.hasArg("st")) {
+    String stVal = server.hasArg("state") ? server.arg("state") : server.arg("st");
+    state_ws2812 = (stVal == "1" || stVal == "true" || stVal == "on");
+  }
+
+  if (server.hasArg("color")) {
+    ws2812_color = server.arg("color");
+  }
+
+  if (server.hasArg("brightness") || server.hasArg("b")) {
+    String bVal = server.hasArg("brightness") ? server.arg("brightness") : server.arg("b");
+    int bPct = bVal.toInt();
+    ws2812_brightness = map(constrain(bPct, 0, 100), 0, 100, 0, 255);
+  }
+
+  if (server.hasArg("mode")) {
+    ws2812_mode = server.arg("mode");
+  }
+
+  if (server.hasArg("plain")) {
+    StaticJsonDocument<256> doc;
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    if (!err) {
+      if (doc.containsKey("state")) state_ws2812 = doc["state"].as<bool>();
+      if (doc.containsKey("st")) state_ws2812 = doc["st"].as<bool>();
+      if (doc.containsKey("color")) ws2812_color = doc["color"].as<String>();
+      if (doc.containsKey("brightness")) {
+        int bPct = doc["brightness"].as<int>();
+        ws2812_brightness = map(constrain(bPct, 0, 100), 0, 100, 0, 255);
+      }
+      if (doc.containsKey("b")) {
+        int bPct = doc["b"].as<int>();
+        ws2812_brightness = map(constrain(bPct, 0, 100), 0, 100, 0, 255);
+      }
+      if (doc.containsKey("mode")) ws2812_mode = doc["mode"].as<String>();
+    }
+  }
+
+  updateWs2812Strip();
+
+  int bPctOut = (int)round((ws2812_brightness * 100.0) / 255.0);
+  String resp = "{\"status\":\"ok\",\"device\":\"dev-corr-rgb-strip\",\"power\":";
+  resp += (state_ws2812 ? "true" : "false");
+  resp += ",\"color\":\"" + ws2812_color + "\"";
+  resp += ",\"brightness\":" + String(bPctOut);
+  resp += ",\"mode\":\"" + ws2812_mode + "\"}";
+
+  server.send(200, "application/json", resp);
+}
+
+// ==========================================
 // --- HTTP / CORS HELPERS ---
 // ==========================================
 void enableCORS() {
@@ -1072,7 +1233,13 @@ String buildStatusJson(bool includeTelemetry = true) {
   json += "\"ldr1_raw\":" + String(ldr1_value) + ",";
   json += "\"light1\":" + String(state_corr1_light ? "true" : "false") + ",";
   json += "\"ldr2_raw\":" + String(ldr2_value) + ",";
-  json += "\"light2\":" + String(state_corr2_light ? "true" : "false");
+  json += "\"light2\":" + String(state_corr2_light ? "true" : "false") + ",";
+  json += "\"rgb\":{";
+  json += "\"power\":" + String(state_ws2812 ? "true" : "false") + ",";
+  json += "\"color\":\"" + ws2812_color + "\",";
+  json += "\"brightness\":" + String((int)round((ws2812_brightness * 100.0) / 255.0)) + ",";
+  json += "\"mode\":\"" + ws2812_mode + "\"";
+  json += "}";
   json += "},";
 
   // Real 24-hour Energy Consumption Array (for App Consumption Charts)
@@ -1169,6 +1336,10 @@ void applyDeviceControl(String dev, bool st) {
   } else if (dev == "cr2" || dev == "corridor2" || dev == "corr2" ||
              dev == "dev-corr-light2" || dev == "dev-corr-light-2") {
     state_corr2_light = st;
+  } else if (dev == "rgb" || dev == "ws2812" || dev == "rgb_strip" ||
+             dev == "dev-corr-rgb-strip") {
+    state_ws2812 = st;
+    updateWs2812Strip();
   }
   // Bulk / Emergency Commands
   else if (dev == "all" || dev == "emergency") {
@@ -1180,6 +1351,8 @@ void applyDeviceControl(String dev, bool st) {
     state_c2_curtain = st;
     state_corr1_light = st;
     state_corr2_light = st;
+    state_ws2812 = st;
+    updateWs2812Strip();
   }
 
   // Instantly apply relay pin states
@@ -1190,10 +1363,30 @@ void handleControl() {
   enableCORS();
 
   // Handle Query Parameters (GET /ctrl?dev=l1&st=1)
-  if (server.hasArg("dev") && server.arg("st")) {
+  if (server.hasArg("dev") && (server.hasArg("st") || server.hasArg("color") || server.hasArg("b") || server.hasArg("mode"))) {
     String dev = server.arg("dev");
     bool st = (server.arg("st") == "1" || server.arg("st") == "true" ||
                server.arg("st") == "on");
+    if (!server.hasArg("st")) {
+      st = state_ws2812;
+    }
+
+    if (dev == "rgb" || dev == "ws2812" || dev == "rgb_strip" || dev == "dev-corr-rgb-strip") {
+      if (server.hasArg("color")) {
+        ws2812_color = server.arg("color");
+      }
+      if (server.hasArg("b")) {
+        int b = server.arg("b").toInt();
+        ws2812_brightness = map(constrain(b, 0, 100), 0, 100, 0, 255);
+      }
+      if (server.hasArg("brightness")) {
+        int b = server.arg("brightness").toInt();
+        ws2812_brightness = map(constrain(b, 0, 100), 0, 100, 0, 255);
+      }
+      if (server.hasArg("mode")) {
+        ws2812_mode = server.arg("mode");
+      }
+    }
 
     // Valid manual command received: Switch to manual mode
     if (isAutoMode) {
@@ -1203,9 +1396,11 @@ void handleControl() {
     }
 
     applyDeviceControl(dev, st);
+    int bPctOut = (int)round((ws2812_brightness * 100.0) / 255.0);
     server.send(200, "application/json",
                 "{\"status\":\"ok\",\"device\":\"" + dev +
-                    "\",\"state\":" + String(st ? "true" : "false") + "}");
+                    "\",\"state\":" + String(st ? "true" : "false") + 
+                    ",\"color\":\"" + ws2812_color + "\",\"brightness\":" + String(bPctOut) + "}");
     return;
   }
 
@@ -1230,6 +1425,18 @@ void handleControl() {
       } else if (doc.containsKey("state")) {
         String stStr = doc["state"].as<String>();
         st = (stStr == "1" || stStr == "true" || stStr == "on");
+      }
+
+      if (dev == "rgb" || dev == "ws2812" || dev == "rgb_strip" || dev == "dev-corr-rgb-strip") {
+        if (doc.containsKey("color")) ws2812_color = doc["color"].as<String>();
+        if (doc.containsKey("brightness")) {
+          int b = doc["brightness"].as<int>();
+          ws2812_brightness = map(constrain(b, 0, 100), 0, 100, 0, 255);
+        } else if (doc.containsKey("b")) {
+          int b = doc["b"].as<int>();
+          ws2812_brightness = map(constrain(b, 0, 100), 0, 100, 0, 255);
+        }
+        if (doc.containsKey("mode")) ws2812_mode = doc["mode"].as<String>();
       }
     } else {
       // Fallback substring search if JSON is malformed
@@ -1312,6 +1519,11 @@ void handleConfig() {
   if (server.hasArg("corr2_w")) {
     rated_corr2 = server.arg("corr2_w").toFloat();
     preferences.putFloat("r_cr2", rated_corr2);
+  }
+  if (server.hasArg("ws2812_w") || server.hasArg("rgb_w")) {
+    String wArg = server.hasArg("ws2812_w") ? server.arg("ws2812_w") : server.arg("rgb_w");
+    rated_ws2812 = wArg.toFloat();
+    preferences.putFloat("r_ws2812", rated_ws2812);
   }
 
   String json = "{";
@@ -2472,6 +2684,7 @@ void setup() {
   rated_c2_fan = preferences.getFloat("r_c2_f", WATTS_CLASS_FAN);
   rated_corr1 = preferences.getFloat("r_cr1", WATTS_CORR_LIGHT);
   rated_corr2 = preferences.getFloat("r_cr2", WATTS_CORR_LIGHT);
+  rated_ws2812 = preferences.getFloat("r_ws2812", WATTS_WS2812_STRIP);
   loadNoticesFromNVS(); // Immediately restore notices onto Notice OLED on boot
   loadTimetableFromNVS(); // Restore timetable schedule from NVS flash memory
   cloud_prev_system_auto = isAutoMode;
@@ -2516,6 +2729,13 @@ void setup() {
   digitalWrite(RELAY_CORRIDOR_LIGHT1, RELAY_OFF);
   digitalWrite(RELAY_CORRIDOR_LIGHT2, RELAY_OFF);
   applyRelayStates();
+
+  // 2b. Initialize WS2812B Addressable LED Strip (15 LEDs, GPIO 5)
+  strip.begin();
+  strip.setBrightness(ws2812_brightness);
+  strip.clear();
+  strip.show();
+  Serial.printf("[HARDWARE] WS2812B LED Strip initialized on GPIO %d (%d LEDs)\n", WS2812_PIN, WS2812_NUM_LEDS);
 
   // 3. Initialize Servos (Closed position)
   curtain1.setPeriodHertz(50);
@@ -2678,6 +2898,10 @@ void setup() {
   server.on("/api/timetable", HTTP_GET, handleTimetableGet);
   server.on("/api/timetable", HTTP_POST, handleTimetablePost);
   server.on("/api/timetable", HTTP_OPTIONS, handleOptions);
+  server.on("/api/rgb", HTTP_ANY, handleApiRgb);
+  server.on("/api/rgb", HTTP_OPTIONS, handleOptions);
+  server.on("/ctrl/rgb", HTTP_ANY, handleApiRgb);
+  server.on("/ctrl/rgb", HTTP_OPTIONS, handleOptions);
 
   server.onNotFound(handleNotFound); // Captive portal redirect & CORS preflight
   server.begin();
@@ -2789,7 +3013,7 @@ void syncWithSupabase() {
 
     HTTPClient https;
     https.setTimeout(7000);
-    String url = String(SUPABASE_URL) + "/rest/v1/devices?select=id,status";
+    String url = String(SUPABASE_URL) + "/rest/v1/devices?select=id,status,settings";
     if (https.begin(client, url)) {
       https.addHeader("apikey", SUPABASE_KEY);
       https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
@@ -2800,7 +3024,7 @@ void syncWithSupabase() {
         supabaseSyncActive = true;
         String payload = https.getString();
 
-        StaticJsonDocument<1536> doc;
+        StaticJsonDocument<2048> doc;
         DeserializationError err = deserializeJson(doc, payload);
         if (!err && doc.is<JsonArray>()) {
           bool anyStateChanged = false;
@@ -2868,6 +3092,20 @@ void syncWithSupabase() {
               else if (strcmp(id, "dev-corr-light-2") == 0 ||
                        strcmp(id, "dev-corr-light2") == 0)
                 cloud_prev_corr2_light = isOn;
+              else if (strcmp(id, "dev-corr-rgb-strip") == 0) {
+                cloud_prev_ws2812 = isOn;
+                state_ws2812 = isOn;
+                if (dev.containsKey("settings")) {
+                  JsonObject s = dev["settings"];
+                  if (s.containsKey("color")) ws2812_color = s["color"].as<String>();
+                  if (s.containsKey("brightness")) {
+                    int b = s["brightness"].as<int>();
+                    ws2812_brightness = map(constrain(b, 0, 100), 0, 100, 0, 255);
+                  }
+                  if (s.containsKey("rgbMode")) ws2812_mode = s["rgbMode"].as<String>();
+                }
+                updateWs2812Strip();
+              }
               else if (strcmp(id, "dev-a101-notice-board") == 0 ||
                        strcmp(id, "dev-a101-notice") == 0) {
                 cloud_prev_c1_notice_board = isOn;
@@ -3002,6 +3240,41 @@ void syncWithSupabase() {
                 cloud_prev_c1_smart_screen = isOn;
                 setSmartScreenPower(isOn);
                 Serial.printf("[CLOUD COMMAND] A101 Smart Screen -> %s\n", isOn ? "ON" : "OFF");
+              }
+            } else if (strcmp(id, "dev-corr-rgb-strip") == 0) {
+              bool stateChanged = (isOn != cloud_prev_ws2812);
+              bool colorChanged = false;
+              if (dev.containsKey("settings")) {
+                JsonObject s = dev["settings"];
+                if (s.containsKey("color")) {
+                  String newColor = s["color"].as<String>();
+                  if (newColor.length() > 0 && newColor != ws2812_color) {
+                    ws2812_color = newColor;
+                    colorChanged = true;
+                  }
+                }
+                if (s.containsKey("brightness")) {
+                  int b = s["brightness"].as<int>();
+                  int newB = map(constrain(b, 0, 100), 0, 100, 0, 255);
+                  if (newB != ws2812_brightness) {
+                    ws2812_brightness = newB;
+                    colorChanged = true;
+                  }
+                }
+                if (s.containsKey("rgbMode")) {
+                  String newMode = s["rgbMode"].as<String>();
+                  if (newMode.length() > 0 && newMode != ws2812_mode) {
+                    ws2812_mode = newMode;
+                    colorChanged = true;
+                  }
+                }
+              }
+              if (stateChanged || colorChanged) {
+                cloud_prev_ws2812 = isOn;
+                state_ws2812 = isOn;
+                updateWs2812Strip();
+                Serial.printf("[CLOUD COMMAND] Corridor RGB Strip -> %s (Color: %s)\n",
+                              isOn ? "ON" : "OFF", ws2812_color.c_str());
               }
             }
           }
@@ -3288,6 +3561,9 @@ void loop() {
   // 1c. Non-blocking Audio Alert Buzzer & Timetable Period Bell
   handleBuzzer();
   checkTimetableBell();
+
+  // 1c2. Non-blocking WS2812B LED Strip Animations (Breathe, Rainbow, Strobe)
+  updateWs2812Animation();
 
   // 1d. Wi-Fi Disconnect Watchdog:
   // If Wi-Fi was connected but drops while running, wait WIFI_CONNECT_TIMEOUT_SEC then launch Hotspot

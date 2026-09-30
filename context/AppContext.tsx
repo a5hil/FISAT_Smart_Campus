@@ -8,7 +8,7 @@ import {
   ESP32Telemetry, NoticeItem, NoticeDuration, TimetableConfig, TimetablePeriod, BellPattern,
 } from '../types';
 import {
-  mockUser, mockCampus, mockClassrooms, mockAlerts, mockNotifications, mockEnergyData, devsA101, defaultTimetable,
+  mockUser, mockCampus, mockClassrooms, mockAlerts, mockNotifications, mockEnergyData, devsA101, devsCorridor, defaultTimetable,
 } from '../mock_data/mockData';
 import { ThemeMode, ThemeColors, DarkColors, LightColors } from '../constants/colors';
 
@@ -94,7 +94,7 @@ const STORAGE_KEYS = {
   LOGGED_IN_USER: '@logged_in_user',
 };
 
-const SETTING_KEYS = ['brightness', 'speed', 'temperature', 'mode', 'fanSpeed', 'volume', 'source', 'direction', 'colorTemp'] as const;
+const SETTING_KEYS = ['brightness', 'speed', 'temperature', 'mode', 'fanSpeed', 'volume', 'source', 'direction', 'colorTemp', 'color', 'rgbMode'] as const;
 
 function deviceSettings(dev: Device): Record<string, unknown> {
   const s: Record<string, unknown> = {};
@@ -112,6 +112,7 @@ function mapDeviceToEsp32Code(classroomId: string, device: Device): string {
   const isCorr = classroomId.includes('corr') || classroomId === 'cls-corridor';
 
   if (isCorr) {
+    if (device.id.includes('rgb') || device.id.includes('strip')) return 'rgb';
     return device.id.includes('2') ? 'cr2' : 'cr1';
   }
   if (isC2) {
@@ -267,6 +268,16 @@ function buildClassrooms(
     devicesByClass.set('cls-a101', [...c1Devs, ...missingA101Devs]);
   }
 
+  // Ensure Corridor zone includes WS2812B LED strip
+  const corrDevs = devicesByClass.get('cls-corridor') ?? [];
+  const missingCorrDevs = devsCorridor.filter(
+    d => d.id === 'dev-corr-rgb-strip' &&
+         !corrDevs.some(existing => existing.id === d.id)
+  );
+  if (missingCorrDevs.length > 0) {
+    devicesByClass.set('cls-corridor', [...corrDevs, ...missingCorrDevs]);
+  }
+
   const alertsByClass = new Map<string, Alert[]>();
   for (const r of alertRows) {
     if (!r.classroom_id) continue;
@@ -405,15 +416,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     // Auto-seed missing display devices into Supabase if needed
-    const missingDevs = devsA101.filter(d => 
-      (d.id === 'dev-a101-notice-board' || d.id === 'dev-a101-smart-screen') &&
-      !(deviceRes.data as DeviceRow[]).some(row => row.id === d.id)
-    );
+    const missingDevs = [
+      ...devsA101.filter(d => 
+        (d.id === 'dev-a101-notice-board' || d.id === 'dev-a101-smart-screen') &&
+        !(deviceRes.data as DeviceRow[]).some(row => row.id === d.id)
+      ).map(d => ({ ...d, classroom_id: 'cls-a101' })),
+      ...devsCorridor.filter(d => 
+        d.id === 'dev-corr-rgb-strip' &&
+        !(deviceRes.data as DeviceRow[]).some(row => row.id === d.id)
+      ).map(d => ({ ...d, classroom_id: 'cls-corridor' })),
+    ];
     if (missingDevs.length > 0) {
       for (const md of missingDevs) {
         void supabase.from('devices').upsert({
           id: md.id,
-          classroom_id: 'cls-a101',
+          classroom_id: md.classroom_id,
           controller_id: md.controllerId,
           name: md.name,
           category: md.category,
@@ -1070,6 +1087,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Corridors & Hallways (Corridor Zone) - Standard setup (No Power Meter)
         if (cls.id === 'cls-corridor' || cls.id.includes('corr')) {
           const updatedDevices = cls.devices.map(dev => {
+            if (dev.id === 'dev-corr-rgb-strip' || dev.id.includes('rgb') || dev.id.includes('strip')) {
+              const rgbHwOn = telemetry.corridors.rgb !== undefined ? telemetry.corridors.rgb.power : (dev.status === 'on');
+              const res = resolveDeviceStatus(dev, rgbHwOn);
+              return {
+                ...dev,
+                ...res,
+                color: telemetry.corridors.rgb?.color || dev.color || '#FF6B00',
+                brightness: telemetry.corridors.rgb?.brightness !== undefined ? telemetry.corridors.rgb.brightness : (dev.brightness ?? 80),
+                rgbMode: telemetry.corridors.rgb?.mode || dev.rgbMode || 'solid',
+              };
+            }
             const isDev1 = dev.id.includes('1');
             const hwOn = isDev1 ? telemetry.corridors.light1 : telemetry.corridors.light2;
             const res = resolveDeviceStatus(dev, hwOn);
@@ -1337,7 +1365,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
     }));
     if (settings) void syncDevices([{ id: deviceId, data: { settings } }]);
-  }, [syncDevices]);
+
+    // Fast LAN dispatch for WS2812B RGB Strip color & brightness changes
+    if (deviceId === 'dev-corr-rgb-strip' || deviceId.includes('rgb')) {
+      const candidateIps = new Set<string>();
+      if (esp32Ip && esp32Ip.trim()) candidateIps.add(esp32Ip.trim());
+      for (const cls of classrooms) {
+        if (cls.controller?.ipAddress && cls.controller.ipAddress.trim()) {
+          candidateIps.add(cls.controller.ipAddress.trim());
+        }
+      }
+      candidateIps.forEach(ip => {
+        const cleanIp = ip.trim();
+        const baseUrl = cleanIp.startsWith('http') ? cleanIp : `http://${cleanIp}`;
+        let url = `${baseUrl}/ctrl?dev=rgb`;
+        if (updates.status !== undefined) url += `&st=${updates.status === 'on' ? '1' : '0'}`;
+        if (updates.color) url += `&color=${encodeURIComponent(updates.color)}`;
+        if (updates.brightness !== undefined) url += `&b=${updates.brightness}`;
+        if (updates.rgbMode) url += `&mode=${encodeURIComponent(updates.rgbMode)}`;
+        fetch(url).catch(() => {});
+      });
+    }
+  }, [classrooms, esp32Ip, syncDevices]);
 
   const updateDeviceRatedPower = useCallback(async (classroomId: string, deviceId: string, ratedWatts: number) => {
     let updatedLoad = 0;

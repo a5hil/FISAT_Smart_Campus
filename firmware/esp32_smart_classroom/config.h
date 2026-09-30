@@ -162,6 +162,12 @@ const unsigned long POWER_METER_SAMPLE_MS =
 #define RELAY_CORRIDOR_LIGHT2                                                  \
   17 // Corridor 2 lights relay (Set to 13 if strictly using old wiring)
 
+// --- Corridor WS2812B Addressable LED Strip (15 LEDs) ---
+#define WS2812_PIN 5          // WS2812B DIN Data Line (GPIO 5 - clean boot, dedicated output)
+#define WS2812_NUM_LEDS 15    // 15 Addressable LEDs on strip
+#define WS2812_DEFAULT_COLOR "#FF6B00" // Default warm amber/orange
+#define WS2812_DEFAULT_BRIGHTNESS 204  // 0-255 brightness (approx 80%)
+
 // ==========================================
 // --- RELAY HARDWARE LOGIC ---
 // ==========================================
@@ -229,5 +235,6 @@ const float WATTS_CLASS_LIGHT = 60.0;
 const float WATTS_CLASS_FAN = 75.0;
 const float WATTS_CORR_LIGHT = 40.0;
 const float WATTS_SERVO_ACTIVE = 5.0;
+const float WATTS_WS2812_STRIP = 4.5; // 15x WS2812B LEDs @ ~0.3W peak = ~4.5W
 
 #endif // CONFIG_H

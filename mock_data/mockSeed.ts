@@ -75,9 +75,26 @@ const devsA102: Device[] = [
 ];
 
 // ─── Corridor Zone ─────────────────────────────────────────────────
-const devsCorridor: Device[] = [
+export const devsCorridor: Device[] = [
   makeDev('dev-corr-light-1', 'Corridor Light 1', 'light', 'off', 5, 'North Wing', 40),
   makeDev('dev-corr-light-2', 'Corridor Light 2', 'light', 'off', 6, 'South Wing', 40),
+  {
+    id: 'dev-corr-rgb-strip',
+    name: 'Corridor LED Strip',
+    category: 'light',
+    status: 'off',
+    controllerId: 'ctrl-esp32',
+    relayChannel: 7, // WS2812B Data Line (GPIO 5)
+    roomArea: 'Corridor Ceiling',
+    capabilities: { power: true, color: true, brightness: true },
+    color: '#FF6B00',
+    brightness: 80,
+    rgbMode: 'solid',
+    powerUsage: 0,
+    ratedPower: 4.5,
+    energyToday: 0.0,
+    lastUpdated: mins(5),
+  },
 ];
 
 function makeActivity(id: string, action: string, user: string, time: string, classroomId?: string): ActivityItem {

@@ -38,6 +38,7 @@ export interface DeviceCapability {
   direction?: boolean;
   timer?: boolean;
   colorTemp?: boolean;
+  color?: boolean;
 }
 
 export interface Device {
@@ -56,6 +57,8 @@ export interface Device {
   fanSpeed?: string;
   volume?: number;
   source?: string;
+  color?: string;
+  rgbMode?: string;
   powerUsage: number;
   ratedPower?: number;
   energyToday: number;
@@ -193,6 +196,12 @@ export interface ESP32Telemetry {
     ldr2Raw: number;
     light1: boolean;
     light2: boolean;
+    rgb?: {
+      power: boolean;
+      color: string;
+      brightness: number;
+      mode?: string;
+    };
   };
 }
 
