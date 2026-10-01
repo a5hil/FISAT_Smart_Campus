@@ -50,17 +50,23 @@ export function ClassroomCard({ classroom }: ClassroomCardProps) {
 
       <View style={[styles.statsRow, { borderTopColor: colors.surfaceBorder }]}>
         <View style={styles.stat}>
-          <Ionicons name="radio-button-on" size={16} color={colors.primary} />
-          <Text style={[styles.statText, { color: colors.textSecondary }]}>{activeDevices} Active Devices</Text>
+          <Ionicons name="radio-button-on" size={15} color={activeDevices > 0 ? colors.primary : colors.textMuted} />
+          <Text style={[styles.statText, { color: colors.textSecondary }]}>{activeDevices} Active</Text>
         </View>
         <View style={styles.stat}>
-          <Ionicons name="thermometer-outline" size={16} color={colors.textMuted} />
+          <Ionicons name="thermometer-outline" size={15} color={colors.textMuted} />
           <Text style={[styles.statText, { color: colors.textSecondary }]}>{classroom.temperature}°C</Text>
         </View>
         <View style={styles.stat}>
-          <Ionicons name="flash-outline" size={16} color={colors.textMuted} />
+          <Ionicons name="water-outline" size={15} color="#38BDF8" />
           <Text style={[styles.statText, { color: colors.textSecondary }]}>
-            {classroom.currentLoad < 1000 ? `${classroom.currentLoad.toFixed(0)} W` : `${(classroom.currentLoad / 1000).toFixed(2)} kW`}
+            {classroom.humidity !== undefined ? `${Math.round(classroom.humidity)}%` : '--%'}
+          </Text>
+        </View>
+        <View style={styles.stat}>
+          <Ionicons name="flash-outline" size={15} color={classroom.currentLoad > 0 ? (isDark ? '#F59E0B' : '#D97706') : colors.textMuted} />
+          <Text style={[styles.statText, { color: colors.textSecondary }]}>
+            {classroom.currentLoad < 1000 ? `${classroom.currentLoad.toFixed(0)} W` : `${(classroom.currentLoad / 1000).toFixed(1)} kW`}
           </Text>
         </View>
       </View>
@@ -130,11 +136,11 @@ const styles = StyleSheet.create({
   stat: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
   statText: {
     color: Colors.text,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '500',
   },
 });

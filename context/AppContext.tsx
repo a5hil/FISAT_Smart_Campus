@@ -157,7 +157,7 @@ async function sendEsp32Command(ip: string, dev: string, st: boolean, timeoutMs 
 interface CampusRow { id: string; name: string; department: string; buildings: string[] | null; }
 interface ClassroomRow {
   id: string; name: string; room_number: string; department: string; building: string; floor: string;
-  capacity: number; occupancy_status: string; status: string; temperature: number; current_load: number;
+  capacity: number; occupancy_status: string; status: string; temperature: number; humidity?: number; current_load: number;
   energy_today: number; estimated_cost: number;
 }
 interface ControllerRow {
@@ -308,7 +308,8 @@ function buildClassrooms(
       id: r.id, name: r.name, number: r.room_number, department: r.department,
       building: r.building, floor: r.floor, capacity: r.capacity,
       occupancy: r.occupancy_status as OccupancyStatus, status: r.status as ClassroomStatus,
-      temperature: r.temperature, currentLoad: initialLoad, energyToday: r.energy_today,
+      temperature: r.temperature, humidity: typeof (r as any).humidity === 'number' ? (r as any).humidity : 55,
+      currentLoad: initialLoad, energyToday: r.energy_today,
       estimatedCost: r.estimated_cost,
       controller: controllersByClass.get(r.id) ?? {
         id: '', name: '', type: '', status: 'offline', signalStrength: 'weak',
@@ -739,6 +740,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 ...cls,
                 occupancy: (newRecord.occupancy_status as 'occupied' | 'vacant') || cls.occupancy,
                 temperature: typeof newRecord.temperature === 'number' ? newRecord.temperature : cls.temperature,
+                humidity: typeof newRecord.humidity === 'number' ? newRecord.humidity : cls.humidity,
                 currentLoad: hasPhysicalSensor
                   ? (typeof newRecord.current_load === 'number' ? newRecord.current_load : cls.currentLoad)
                   : activeDeviceLoad,
@@ -1027,6 +1029,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return {
             ...cls,
             temperature: telemetry.temperature,
+            humidity: telemetry.humidity,
             occupancy: telemetry.c1.occupied ? 'occupied' : 'vacant',
             currentLoad: c1Load,
             voltage: telemetry.c1.voltage ?? 0,
@@ -1073,6 +1076,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return {
             ...cls,
             temperature: telemetry.temperature,
+            humidity: telemetry.humidity,
             occupancy: telemetry.c2.occupied ? 'occupied' : 'vacant',
             currentLoad: c2Load,
             voltage: 0,
@@ -1114,6 +1118,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const corLoad = updatedDevices.reduce((sum, d) => sum + (d.status === 'on' ? (d.powerUsage || 0) : 0), 0);
           return {
             ...cls,
+            temperature: telemetry.temperature,
+            humidity: telemetry.humidity,
             currentLoad: corLoad,
             voltage: 0,
             current: 0,
@@ -1138,7 +1144,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const [ctrlRes, devRes, clsRes] = await Promise.all([
             supabase.from('controllers').select('status, ip_address').eq('id', 'ctrl-esp32').single(),
             supabase.from('devices').select('id, classroom_id, status, power_usage, settings, energy_today, last_updated'),
-            supabase.from('classrooms').select('id, temperature, occupancy_status, current_load, status'),
+            supabase.from('classrooms').select('id, temperature, humidity, occupancy_status, current_load, status'),
           ]);
 
           if (ctrlRes.data && ctrlRes.data.status === 'online') {
@@ -1212,6 +1218,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 ...cls,
                 occupancy: (cloudCls.occupancy_status as 'occupied' | 'vacant') || cls.occupancy,
                 temperature: typeof cloudCls.temperature === 'number' ? cloudCls.temperature : cls.temperature,
+                humidity: typeof (cloudCls as any).humidity === 'number' ? (cloudCls as any).humidity : cls.humidity,
                 currentLoad: hasPhysicalSensor
                   ? (typeof cloudCls.current_load === 'number' ? cloudCls.current_load : cls.currentLoad)
                   : activeDeviceLoad,

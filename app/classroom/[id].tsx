@@ -88,6 +88,29 @@ export default function ClassroomDetailScreen() {
           </View>
         </View>
 
+        {/* Live Climate / DHT11 Sensors Row */}
+        <View style={[styles.infoCardsRow, { marginTop: 10 }]}>
+          <View style={styles.infoCard}>
+            <View style={[styles.infoIcon, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.12)' }]}>
+              <Ionicons name="thermometer-outline" size={20} color={isDark ? '#F87171' : '#DC2626'} />
+            </View>
+            <View>
+              <Text style={styles.infoLabel}>Temperature</Text>
+              <Text style={styles.infoValue}>{classroom.temperature}°C</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoCard}>
+            <View style={[styles.infoIcon, { backgroundColor: isDark ? 'rgba(56, 189, 248, 0.15)' : 'rgba(14, 165, 233, 0.12)' }]}>
+              <Ionicons name="water-outline" size={20} color={isDark ? '#38BDF8' : '#0284C7'} />
+            </View>
+            <View>
+              <Text style={styles.infoLabel}>Humidity</Text>
+              <Text style={styles.infoValue}>{classroom.humidity !== undefined ? `${Math.round(classroom.humidity)}%` : '--%'}</Text>
+            </View>
+          </View>
+        </View>
+
         {/* ESP32 Hardware Status Banner */}
         {isEsp32Controlled && (
           <View style={styles.hardwareBanner}>

@@ -89,6 +89,7 @@ export interface Classroom {
   occupancy: OccupancyStatus;
   status: ClassroomStatus;
   temperature: number;
+  humidity?: number;
   currentLoad: number;
   energyToday: number;
   estimatedCost: number;
