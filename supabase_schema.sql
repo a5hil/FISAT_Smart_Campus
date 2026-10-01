@@ -193,3 +193,59 @@ CREATE TABLE IF NOT EXISTS public.announcements (
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- =================================================================================
+-- 3. INITIAL SEED DATA (Campuses, Classrooms, Controllers & Devices)
+-- =================================================================================
+
+-- Seed Campus
+INSERT INTO public.campuses (id, name, department, buildings)
+VALUES ('00000000-0000-0000-0000-000000000001', 'FISAT', 'IMCA Department', ARRAY['Block A', 'Idea Lab'])
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, department = EXCLUDED.department, buildings = EXCLUDED.buildings;
+
+-- Seed Classrooms
+INSERT INTO public.classrooms (id, name, room_number, department, building, floor, capacity, occupancy_status, status, temperature, current_load, energy_today, estimated_cost)
+VALUES 
+  ('cls-a101', 'Classroom A101', 'A101', 'IMCA', 'Block A', '1st Floor', 60, 'vacant', 'online', 24.5, 0.0, 0.0, 0.0),
+  ('cls-a102', 'Classroom A102', 'A102', 'IMCA', 'Block A', '1st Floor', 60, 'vacant', 'online', 24.5, 0.0, 0.0, 0.0),
+  ('cls-corridor', 'Corridors & Hallways', 'CORR-1', 'Campus Facilities', 'Block A', '1st Floor', 100, 'vacant', 'online', 26.0, 0.0, 0.0, 0.0)
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = EXCLUDED.status;
+
+-- Seed ESP32 Controller
+INSERT INTO public.controllers (id, classroom_id, name, type, status, signal_strength, ip_address, firmware_version, relay_channels, used_channels, last_seen)
+VALUES 
+  ('ctrl-esp32', 'cls-a101', 'ESP32 Dual-Controller', 'ESP32-WROOM-32', 'online', 'strong', '192.168.1.101', 'v2.4.0-WS2812B', 8, ARRAY[1, 2, 3, 4, 5, 6, 7, 8], NOW())
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = EXCLUDED.status, last_seen = NOW();
+
+-- Seed Devices (Classroom 1, Classroom 2, and Corridor WS2812B NeoPixel LED Strip)
+INSERT INTO public.devices (id, classroom_id, controller_id, name, category, status, relay_channel, room_area, capabilities, settings, power_usage, energy_today, last_updated)
+VALUES 
+  -- Classroom A101
+  ('dev-a101-light-1', 'cls-a101', 'ctrl-esp32', 'Main Lights', 'light', 'off', 1, 'Ceiling', '{"power": true}'::jsonb, '{"ratedPower": 60}'::jsonb, 0.0, 0.0, NOW()),
+  ('dev-a101-fan-1', 'cls-a101', 'ctrl-esp32', 'Ceiling Fan', 'fan', 'off', 2, 'Center', '{"power": true}'::jsonb, '{"ratedPower": 75}'::jsonb, 0.0, 0.0, NOW()),
+  ('dev-a101-curtain', 'cls-a101', 'ctrl-esp32', 'Motorized Curtains', 'curtain', 'off', 18, 'Windows', '{"power": true}'::jsonb, '{"ratedPower": 5}'::jsonb, 0.0, 0.0, NOW()),
+  ('dev-a101-notice-board', 'cls-a101', 'ctrl-esp32', 'Campus Notice Board', 'display', 'on', 13, 'Front Wall', '{"power": true}'::jsonb, '{"ratedPower": 3}'::jsonb, 3.0, 0.0, NOW()),
+  ('dev-a101-smart-screen', 'cls-a101', 'ctrl-esp32', 'Smart Screen Display', 'display', 'on', 21, 'Podium', '{"power": true}'::jsonb, '{"ratedPower": 4}'::jsonb, 4.0, 0.0, NOW()),
+
+  -- Classroom A102
+  ('dev-a102-light-1', 'cls-a102', 'ctrl-esp32', 'Main Lights', 'light', 'off', 3, 'Ceiling', '{"power": true}'::jsonb, '{"ratedPower": 60}'::jsonb, 0.0, 0.0, NOW()),
+  ('dev-a102-fan-1', 'cls-a102', 'ctrl-esp32', 'Ceiling Fan', 'fan', 'off', 4, 'Center', '{"power": true}'::jsonb, '{"ratedPower": 75}'::jsonb, 0.0, 0.0, NOW()),
+  ('dev-a102-curtain', 'cls-a102', 'ctrl-esp32', 'Motorized Curtains', 'curtain', 'off', 19, 'Windows', '{"power": true}'::jsonb, '{"ratedPower": 5}'::jsonb, 0.0, 0.0, NOW()),
+
+  -- Corridor Zone (Including WS2812B NeoPixel LED Strip)
+  ('dev-corr-light-1', 'cls-corridor', 'ctrl-esp32', 'Corridor Light 1', 'light', 'off', 5, 'North Wing', '{"power": true}'::jsonb, '{"ratedPower": 40}'::jsonb, 0.0, 0.0, NOW()),
+  ('dev-corr-light-2', 'cls-corridor', 'ctrl-esp32', 'Corridor Light 2', 'light', 'off', 6, 'South Wing', '{"power": true}'::jsonb, '{"ratedPower": 40}'::jsonb, 0.0, 0.0, NOW()),
+  ('dev-corr-rgb-strip', 'cls-corridor', 'ctrl-esp32', 'Corridor LED Strip', 'light', 'off', 7, 'Corridor Ceiling', '{"power": true, "color": true, "brightness": true}'::jsonb, '{"color": "#FF6B00", "brightness": 80, "rgbMode": "solid", "ratedPower": 4.5}'::jsonb, 0.0, 0.0, NOW())
+ON CONFLICT (id) DO UPDATE 
+SET 
+  name = EXCLUDED.name,
+  category = EXCLUDED.category,
+  capabilities = EXCLUDED.capabilities,
+  settings = EXCLUDED.settings,
+  last_updated = NOW();
+
+-- Seed Default Welcome Notice
+INSERT INTO public.announcements (id, classroom_id, classroom_name, title, message, duration, is_active, created_at)
+VALUES 
+  ('ann-welcome-01', 'all', 'All Classrooms (Broadcast)', 'Welcome to NBA Smart Campus', 'All IoT energy monitoring, automation, timetable bells, and corridor LED controls active.', '24h', true, NOW())
+ON CONFLICT (id) DO NOTHING;

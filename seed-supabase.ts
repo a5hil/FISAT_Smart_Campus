@@ -21,7 +21,7 @@ const supabase = createClient(
   env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '',
 );
 
-const SETTING_KEYS = ['brightness', 'speed', 'temperature', 'mode', 'fanSpeed', 'volume', 'source', 'direction', 'colorTemp', 'ratedPower'] as const;
+const SETTING_KEYS = ['brightness', 'speed', 'temperature', 'mode', 'fanSpeed', 'volume', 'source', 'direction', 'colorTemp', 'ratedPower', 'color', 'rgbMode'] as const;
 
 function extractSettings(dev: { [k: string]: unknown }): Record<string, unknown> {
   const settings: Record<string, unknown> = {};

@@ -61,7 +61,7 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
     if (isOffline) return 'Offline';
     if (isCurtain) return isOn ? 'Open (90°)' : 'Closed';
     if (isRgb) {
-      return isOn ? `On • ${activeColor} • ${device.brightness ?? 80}%` : 'Off';
+      return isOn ? `On • ${device.brightness ?? 80}%` : 'Off';
     }
     const isDisplay = device.id.includes('notice') || device.id.includes('screen') || device.category === 'smart-board' || device.category === 'display';
     if (isDisplay) {

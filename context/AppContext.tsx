@@ -130,18 +130,24 @@ function mapDeviceToEsp32Code(classroomId: string, device: Device): string {
   return isC2 ? 'l2' : 'l1';
 }
 
-async function sendEsp32Command(ip: string, dev: string, st: boolean) {
+async function sendEsp32Command(ip: string, dev: string, st: boolean, timeoutMs = 3500) {
   if (!ip || ip.trim() === '') return;
   const cleanIp = ip.trim();
   const baseUrl = cleanIp.startsWith('http') ? cleanIp : `http://${cleanIp}`;
   const url = `${baseUrl}/ctrl?dev=${encodeURIComponent(dev)}&st=${st ? '1' : '0'}&force=1`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1200);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    await fetch(url, { signal: controller.signal });
-  } catch (e) {
-    // Non-intrusive logging - gracefully handles offline controllers or simulation mode
-    console.log(`[ESP32 Sync] Direct LAN command to ${cleanIp} (${dev}=${st}):`, (e as Error).message);
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      console.log(`[ESP32 Sync] Direct LAN command to ${cleanIp} (${dev}=${st}): HTTP ${res.status}`);
+    }
+  } catch (e: any) {
+    if (e.name === 'AbortError' || e.message?.includes('canceled') || e.message?.includes('aborted')) {
+      console.log(`[ESP32 Sync] Direct LAN command to ${cleanIp} (${dev}=${st}): timeout (${timeoutMs}ms) - controller offline or busy`);
+    } else {
+      console.log(`[ESP32 Sync] Direct LAN command to ${cleanIp} (${dev}=${st}):`, e.message);
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -346,6 +352,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const lastNoticeSyncRef = useRef<number>(0);
   const lastTimeSyncRef = useRef<number>(0);
   const noticesRef = useRef<NoticeItem[]>([]);
+  const rgbFetchAbortRef = useRef<AbortController | null>(null);
+  const debouncedSyncTimeoutRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const setThemeMode = useCallback((mode: ThemeMode) => {
     setThemeModeState(mode);
@@ -1364,10 +1372,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }),
       };
     }));
-    if (settings) void syncDevices([{ id: deviceId, data: { settings } }]);
 
-    // Fast LAN dispatch for WS2812B RGB Strip color & brightness changes
+    // Cloud database persistence: immediate for discrete modes/power, debounced for rapid color/brightness drags
+    const targetSettings = settings;
+    if (targetSettings) {
+      const isDiscrete = updates.rgbMode !== undefined || updates.status !== undefined;
+      if (isDiscrete) {
+        if (debouncedSyncTimeoutRef.current[deviceId]) {
+          clearTimeout(debouncedSyncTimeoutRef.current[deviceId]);
+          delete debouncedSyncTimeoutRef.current[deviceId];
+        }
+        void syncDevices([{ id: deviceId, data: { settings: targetSettings } }]);
+      } else {
+        if (debouncedSyncTimeoutRef.current[deviceId]) {
+          clearTimeout(debouncedSyncTimeoutRef.current[deviceId]);
+        }
+        const stCopy = Object.assign({}, targetSettings);
+        debouncedSyncTimeoutRef.current[deviceId] = setTimeout(() => {
+          void syncDevices([{ id: deviceId, data: { settings: stCopy } }]);
+          delete debouncedSyncTimeoutRef.current[deviceId];
+        }, 300);
+      }
+    }
+
+    // Instant LAN dispatch for WS2812B RGB Strip with active in-flight request abortion
     if (deviceId === 'dev-corr-rgb-strip' || deviceId.includes('rgb')) {
+      if (rgbFetchAbortRef.current) {
+        rgbFetchAbortRef.current.abort();
+      }
+      const controller = new AbortController();
+      rgbFetchAbortRef.current = controller;
+
       const candidateIps = new Set<string>();
       if (esp32Ip && esp32Ip.trim()) candidateIps.add(esp32Ip.trim());
       for (const cls of classrooms) {
@@ -1375,6 +1410,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           candidateIps.add(cls.controller.ipAddress.trim());
         }
       }
+
       candidateIps.forEach(ip => {
         const cleanIp = ip.trim();
         const baseUrl = cleanIp.startsWith('http') ? cleanIp : `http://${cleanIp}`;
@@ -1383,7 +1419,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (updates.color) url += `&color=${encodeURIComponent(updates.color)}`;
         if (updates.brightness !== undefined) url += `&b=${updates.brightness}`;
         if (updates.rgbMode) url += `&mode=${encodeURIComponent(updates.rgbMode)}`;
-        fetch(url).catch(() => {});
+
+        fetch(url, { signal: controller.signal }).catch(() => {});
       });
     }
   }, [classrooms, esp32Ip, syncDevices]);
@@ -1503,18 +1540,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      candidateIps.forEach(ip => {
+      candidateIps.forEach(async ip => {
         if (control === 'allLights') {
-          void sendEsp32Command(ip, 'l1', newState);
-          void sendEsp32Command(ip, 'l2', newState);
-          void sendEsp32Command(ip, 'cr1', newState);
-          void sendEsp32Command(ip, 'cr2', newState);
+          await sendEsp32Command(ip, 'l1', newState);
+          await sendEsp32Command(ip, 'l2', newState);
+          await sendEsp32Command(ip, 'cr1', newState);
+          await sendEsp32Command(ip, 'cr2', newState);
         } else if (control === 'allFans') {
-          void sendEsp32Command(ip, 'f1', newState);
-          void sendEsp32Command(ip, 'f2', newState);
+          await sendEsp32Command(ip, 'f1', newState);
+          await sendEsp32Command(ip, 'f2', newState);
         } else if (control === 'allCurtains') {
-          void sendEsp32Command(ip, 'c1', newState);
-          void sendEsp32Command(ip, 'c2', newState);
+          await sendEsp32Command(ip, 'c1', newState);
+          await sendEsp32Command(ip, 'c2', newState);
         }
       });
 

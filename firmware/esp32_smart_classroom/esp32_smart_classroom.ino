@@ -1024,8 +1024,9 @@ void updateWs2812Strip() {
 
   strip.setBrightness(ws2812_brightness);
 
-  if (ws2812_mode == "rainbow" || ws2812_mode == "breathe" || ws2812_mode == "strobe") {
+  if (ws2812_mode == "rainbow" || ws2812_mode == "breathe" || ws2812_mode == "strobe" || ws2812_mode == "chase" || ws2812_mode == "fire") {
     // Handled dynamically in updateWs2812Animation()
+    last_ws2812_anim_ms = 0;
     return;
   }
 
@@ -1068,7 +1069,7 @@ void updateWs2812Animation() {
       strip.show();
     }
   } else if (ws2812_mode == "strobe") {
-    if (now - last_ws2812_anim_ms >= 200) {
+    if (now - last_ws2812_anim_ms >= 150) {
       last_ws2812_anim_ms = now;
       ws2812_strobe_state = !ws2812_strobe_state;
       strip.setBrightness(ws2812_brightness);
@@ -1080,6 +1081,34 @@ void updateWs2812Animation() {
       } else {
         strip.clear();
       }
+      strip.show();
+    }
+  } else if (ws2812_mode == "chase") {
+    if (now - last_ws2812_anim_ms >= 45) {
+      last_ws2812_anim_ms = now;
+      ws2812_anim_step = (ws2812_anim_step + 1) % WS2812_NUM_LEDS;
+      strip.setBrightness(ws2812_brightness);
+      uint32_t c = parseHexColor(ws2812_color);
+      for (int i = 0; i < WS2812_NUM_LEDS; i++) {
+        if (i == ws2812_anim_step || i == (ws2812_anim_step + 1) % WS2812_NUM_LEDS) {
+          strip.setPixelColor(i, c);
+        } else {
+          strip.setPixelColor(i, 0);
+        }
+      }
+      strip.show();
+    }
+  } else if (ws2812_mode == "fire") {
+    if (now - last_ws2812_anim_ms >= 55) {
+      last_ws2812_anim_ms = now;
+      for (int i = 0; i < WS2812_NUM_LEDS; i++) {
+        int flicker = random(0, 50);
+        int r1 = constrain(255 - flicker, 0, 255);
+        int g1 = constrain(90 - flicker, 0, 255);
+        int b1 = constrain(10 - (flicker / 2), 0, 255);
+        strip.setPixelColor(i, strip.Color(r1, g1, b1));
+      }
+      strip.setBrightness(ws2812_brightness);
       strip.show();
     }
   }
@@ -3003,16 +3032,16 @@ void syncWithSupabase() {
     return;
   }
 
-  // 1. Fetch Remote Device Commands from Supabase (Every 1000ms)
+  // 1. Fetch Remote Device Commands from Supabase (Every 2500ms)
   if (now - lastSupabasePoll >= SUPABASE_POLL_INTERVAL_MS) {
     lastSupabasePoll = now;
 
     WiFiClientSecure client;
     client.setInsecure(); // Supabase HTTPS
-    client.setTimeout(7000); // 7000ms socket timeout (allows TLS handshake over Internet)
+    client.setTimeout(2500); // 2.5s socket timeout (prevents blocking local Wi-Fi server)
 
     HTTPClient https;
-    https.setTimeout(7000);
+    https.setTimeout(2500);
     String url = String(SUPABASE_URL) + "/rest/v1/devices?select=id,status,settings";
     if (https.begin(client, url)) {
       https.addHeader("apikey", SUPABASE_KEY);
@@ -3288,6 +3317,7 @@ void syncWithSupabase() {
         }
       } else {
         supabaseSyncActive = false;
+        lastSupabasePoll = millis() + 3000; // Backoff 3 seconds on failure so Wi-Fi stack doesn't choke
         static unsigned long lastErr = 0;
         if (millis() - lastErr > 6000) {
           Serial.printf("[SUPABASE ERROR] GET devices HTTP %d: %s\n", httpCode,
@@ -3308,9 +3338,9 @@ void syncWithSupabase() {
 
     WiFiClientSecure client;
     client.setInsecure();
-    client.setTimeout(7000);
+    client.setTimeout(2500);
     HTTPClient https;
-    https.setTimeout(7000);
+    https.setTimeout(2500);
 
     if (telemetryStep == 0) {
       // Slot 0: Classroom A101 Telemetry
@@ -3542,7 +3572,7 @@ void supabaseCloudTask(void *pvParameters) {
       }
       syncWithSupabase();
     }
-    vTaskDelay(pdMS_TO_TICKS(60)); // Yield to FreeRTOS scheduler
+    vTaskDelay(pdMS_TO_TICKS(250)); // Yield to FreeRTOS scheduler & Wi-Fi stack
   }
 }
 

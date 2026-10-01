@@ -1,5 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, TextInput } from 'react-native';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  PanResponder,
+  GestureResponderEvent,
+  PanResponderGestureState,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '../../constants/colors';
 import { Layout } from '../../constants/layout';
@@ -7,6 +17,1046 @@ import { ScreenHeader } from '../../components/ScreenHeader';
 import { FloatingBottomNav } from '../../components/FloatingBottomNav';
 import { useApp, useTheme } from '../../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, {
+  Defs,
+  LinearGradient as SvgLinearGradient,
+  RadialGradient as SvgRadialGradient,
+  Stop,
+  Rect,
+  Path,
+  Circle,
+  G,
+} from 'react-native-svg';
+
+function hsvToHex(h: number, s: number, v: number): string {
+  s = Math.max(0, Math.min(1, s / 100));
+  v = Math.max(0, Math.min(1, v / 100));
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let r = 0, g = 0, b = 0;
+  if (h >= 0 && h < 60) { r = c; g = x; b = 0; }
+  else if (h >= 60 && h < 120) { r = x; g = c; b = 0; }
+  else if (h >= 120 && h < 180) { r = 0; g = c; b = x; }
+  else if (h >= 180 && h < 240) { r = 0; g = x; b = c; }
+  else if (h >= 240 && h < 300) { r = x; g = 0; b = c; }
+  else if (h >= 300 && h < 360) { r = c; g = 0; b = x; }
+  const toHex = (n: number) => {
+    const hex = Math.round((n + m) * 255).toString(16);
+    return hex.length === 1 ? '0' + hex : hex;
+  };
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+}
+
+function hexToHsv(hex: string): { h: number; s: number; v: number } {
+  let clean = hex.replace('#', '');
+  if (clean.length === 3) clean = clean.split('').map(c => c + c).join('');
+  if (clean.length !== 6) return { h: 0, s: 100, v: 100 };
+  const r = parseInt(clean.substring(0, 2), 16) / 255;
+  const g = parseInt(clean.substring(2, 4), 16) / 255;
+  const b = parseInt(clean.substring(4, 6), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h = Math.round(h * 60);
+    if (h < 0) h += 360;
+  }
+  const s = max === 0 ? 0 : Math.round((d / max) * 100);
+  const v = Math.round(max * 100);
+  return { h, s, v };
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  let clean = hex.replace('#', '');
+  if (clean.length === 3) clean = clean.split('').map(c => c + c).join('');
+  if (clean.length !== 6) return { r: 255, g: 107, b: 0 };
+  return {
+    r: parseInt(clean.substring(0, 2), 16) || 0,
+    g: parseInt(clean.substring(2, 4), 16) || 0,
+    b: parseInt(clean.substring(4, 6), 16) || 0,
+  };
+}
+
+function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
+  const rNorm = r / 255;
+  const gNorm = g / 255;
+  const bNorm = b / 255;
+  const max = Math.max(rNorm, gNorm, bNorm);
+  const min = Math.min(rNorm, gNorm, bNorm);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case rNorm: h = (gNorm - bNorm) / d + (gNorm < bNorm ? 6 : 0); break;
+      case gNorm: h = (bNorm - rNorm) / d + 2; break;
+      case bNorm: h = (rNorm - gNorm) / d + 4; break;
+    }
+    h /= 6;
+  }
+  return {
+    h: Math.round(h * 360),
+    s: Math.round(s * 100),
+    l: Math.round(l * 100),
+  };
+}
+
+interface ChromaPanelColorStudioProps {
+  currentColor: string;
+  currentBrightness: number;
+  currentMode: string;
+  isOn: boolean;
+  onColorChange: (hex: string) => void;
+  onBrightnessChange: (brightness: number) => void;
+  onModeChange: (mode: string) => void;
+  onTogglePower: () => void;
+  colors: any;
+  isDark: boolean;
+}
+
+export function ChromaPanelColorStudio({
+  currentColor,
+  currentBrightness,
+  currentMode,
+  isOn,
+  onColorChange,
+  onBrightnessChange,
+  onModeChange,
+  onTogglePower,
+  colors,
+  isDark,
+}: ChromaPanelColorStudioProps) {
+  const [activeTab, setActiveTab] = useState<'wheel' | 'effects'>('wheel');
+  const [formatMode, setFormatMode] = useState<'HEX' | 'RGB' | 'HSL'>('HEX');
+  const [customHex, setCustomHex] = useState(currentColor);
+  const [sliderWidth, setSliderWidth] = useState(300);
+
+  const WHEEL_SIZE = 240;
+  const RADIUS = 108;
+  const CENTER = WHEEL_SIZE / 2;
+
+  const currentHsv = useMemo(() => hexToHsv(currentColor), [currentColor]);
+  const [hsv, setHsv] = useState(currentHsv);
+
+  useEffect(() => {
+    setHsv(hexToHsv(currentColor));
+    setCustomHex(currentColor);
+  }, [currentColor]);
+
+  const rgb = useMemo(() => hexToRgb(currentColor), [currentColor]);
+  const hsl = useMemo(() => rgbToHsl(rgb.r, rgb.g, rgb.b), [rgb]);
+
+  // 96 High-definition SVG Chromatic Wedges with 0.1deg overlap for seamless color circle
+  const svgWheelPaths = useMemo(() => {
+    const NUM_SEGMENTS = 96;
+    const paths = [];
+    for (let i = 0; i < NUM_SEGMENTS; i++) {
+      const theta1 = (i * 360) / NUM_SEGMENTS;
+      const theta2 = ((i + 1.15) * 360) / NUM_SEGMENTS;
+      const rad1 = (theta1 * Math.PI) / 180;
+      const rad2 = (theta2 * Math.PI) / 180;
+
+      // Red (0°) at exact top (12 o'clock)
+      const x1 = CENTER + RADIUS * Math.sin(rad1);
+      const y1 = CENTER - RADIUS * Math.cos(rad1);
+      const x2 = CENTER + RADIUS * Math.sin(rad2);
+      const y2 = CENTER - RADIUS * Math.cos(rad2);
+
+      const d = `M ${CENTER} ${CENTER} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${RADIUS} ${RADIUS} 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`;
+      const fill = hsvToHex((theta1 + theta2) / 2, 100, 100);
+      paths.push({ d, fill, key: i });
+    }
+    return paths;
+  }, [CENTER, RADIUS]);
+
+  // Throttled Network Dispatch References
+  const lastColorSendRef = useRef<number>(0);
+  const colorThrottleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastBriSendRef = useRef<number>(0);
+  const briThrottleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Handle color selection on wheel touch / drag
+  const handleWheelTouch = (x: number, y: number, isFinal = false) => {
+    const dx = x - CENTER;
+    const dy = y - CENTER;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const r = Math.min(RADIUS, dist);
+
+    // Angle clockwise from top (Red = 0°)
+    let deg = (Math.atan2(dx, -dy) * 180) / Math.PI;
+    if (deg < 0) deg += 360;
+
+    const sat = Math.min(100, Math.max(0, Math.round((r / RADIUS) * 100)));
+    const hue = Math.round(deg) % 360;
+
+    const nextHsv = { h: hue, s: sat, v: 100 };
+    setHsv(nextHsv);
+    const newHex = hsvToHex(nextHsv.h, nextHsv.s, nextHsv.v);
+    setCustomHex(newHex);
+
+    if (isFinal) {
+      if (colorThrottleTimer.current) {
+        clearTimeout(colorThrottleTimer.current);
+        colorThrottleTimer.current = null;
+      }
+      lastColorSendRef.current = Date.now();
+      onColorChange(newHex);
+    } else {
+      const now = Date.now();
+      if (now - lastColorSendRef.current >= 45) {
+        lastColorSendRef.current = now;
+        if (colorThrottleTimer.current) {
+          clearTimeout(colorThrottleTimer.current);
+          colorThrottleTimer.current = null;
+        }
+        onColorChange(newHex);
+      } else if (!colorThrottleTimer.current) {
+        colorThrottleTimer.current = setTimeout(() => {
+          colorThrottleTimer.current = null;
+          lastColorSendRef.current = Date.now();
+          onColorChange(newHex);
+        }, 50);
+      }
+    }
+  };
+
+  const wheelPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => handleWheelTouch(evt.nativeEvent.locationX, evt.nativeEvent.locationY, false),
+      onPanResponderMove: (evt) => handleWheelTouch(evt.nativeEvent.locationX, evt.nativeEvent.locationY, false),
+      onPanResponderRelease: (evt) => handleWheelTouch(evt.nativeEvent.locationX, evt.nativeEvent.locationY, true),
+      onPanResponderTerminate: (evt) => handleWheelTouch(evt.nativeEvent.locationX, evt.nativeEvent.locationY, true),
+    })
+  ).current;
+
+  // Master Brightness Slider PanResponder with throttling
+  const handleBrightnessSlide = (x: number, isFinal = false) => {
+    if (sliderWidth <= 0) return;
+    const clampedX = Math.max(0, Math.min(sliderWidth, x));
+    const pct = Math.max(5, Math.round((clampedX / sliderWidth) * 100));
+
+    if (isFinal) {
+      if (briThrottleTimer.current) {
+        clearTimeout(briThrottleTimer.current);
+        briThrottleTimer.current = null;
+      }
+      lastBriSendRef.current = Date.now();
+      onBrightnessChange(pct);
+    } else {
+      const now = Date.now();
+      if (now - lastBriSendRef.current >= 45) {
+        lastBriSendRef.current = now;
+        if (briThrottleTimer.current) {
+          clearTimeout(briThrottleTimer.current);
+          briThrottleTimer.current = null;
+        }
+        onBrightnessChange(pct);
+      } else if (!briThrottleTimer.current) {
+        briThrottleTimer.current = setTimeout(() => {
+          briThrottleTimer.current = null;
+          lastBriSendRef.current = Date.now();
+          onBrightnessChange(pct);
+        }, 50);
+      }
+    }
+  };
+
+  const brightnessPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => handleBrightnessSlide(evt.nativeEvent.locationX, false),
+      onPanResponderMove: (evt) => handleBrightnessSlide(evt.nativeEvent.locationX, false),
+      onPanResponderRelease: (evt) => handleBrightnessSlide(evt.nativeEvent.locationX, true),
+      onPanResponderTerminate: (evt) => handleBrightnessSlide(evt.nativeEvent.locationX, true),
+    })
+  ).current;
+
+  // Color Temperature (Warm White / Cool Daylight) Slider
+  const KELVIN_COLORS = ['#FFA54F', '#FFD1A4', '#FFE4CE', '#FFF8F0', '#FFFFFF', '#D6E8FF', '#A8D0FF'];
+  const handleWarmthSlide = (x: number) => {
+    if (sliderWidth <= 0) return;
+    const clampedX = Math.max(0, Math.min(sliderWidth, x));
+    const ratio = clampedX / sliderWidth;
+    const idx = Math.min(KELVIN_COLORS.length - 1, Math.floor(ratio * KELVIN_COLORS.length));
+    const chosenColor = KELVIN_COLORS[idx];
+    onColorChange(chosenColor);
+  };
+
+  const warmthPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => handleWarmthSlide(evt.nativeEvent.locationX),
+      onPanResponderMove: (evt) => handleWarmthSlide(evt.nativeEvent.locationX),
+    })
+  ).current;
+
+  // Curated Chroma Palette Swatches (Matching WLED / Pro Chroma standards)
+  const CHROMA_PALETTE_ROW1 = [
+    { hex: '#FF1744', label: 'Crimson' },
+    { hex: '#FF7A00', label: 'Amber Orange' },
+    { hex: '#FFD700', label: 'Gold' },
+    { hex: '#FFE4B5', label: 'Warm 2700K' },
+    { hex: '#FFF8F0', label: 'Soft 4000K' },
+    { hex: '#FFFFFF', label: 'Pure White' },
+  ];
+
+  const CHROMA_PALETTE_ROW2 = [
+    { hex: '#FF007F', label: 'Vivid Pink' },
+    { hex: '#8A2BE2', label: 'Purple' },
+    { hex: '#2979FF', label: 'Electric Blue' },
+    { hex: '#00E5FF', label: 'Neon Cyan' },
+    { hex: '#00E676', label: 'Emerald Green' },
+    { hex: '#18181B', label: 'Obsidian' },
+  ];
+
+  const CHROMA_EFFECTS = [
+    { id: 'solid', name: 'Solid Chroma', icon: 'color-filter-outline', desc: 'Precise static chromatic illumination' },
+    { id: 'breathe', name: 'Chroma Pulse', icon: 'pulse-outline', desc: 'Gentle rhythmic ambient breathing glow' },
+    { id: 'rainbow', name: 'Full Spectrum Wave', icon: 'sparkles-outline', desc: 'Continuous 360° dynamic color cycle' },
+    { id: 'strobe', name: 'Flash / Strobe', icon: 'flash-outline', desc: 'High visibility strobe beacon' },
+    { id: 'chase', name: 'Color Chase', icon: 'swap-horizontal-outline', desc: 'Sequential flowing light stream' },
+    { id: 'fire', name: 'Fireplace Flicker', icon: 'flame-outline', desc: 'Natural organic flame warmth' },
+  ];
+
+  const activeEffectObj = CHROMA_EFFECTS.find(e => e.id === currentMode) || CHROMA_EFFECTS[0];
+  const dynamicStyles = getChromaDynamicStyles(colors, isDark);
+
+  // Calculate Wheel Knob Position (Red 0° Top)
+  const thetaRad = (hsv.h * Math.PI) / 180;
+  const thumbRadius = (hsv.s / 100) * RADIUS;
+  const wheelThumbX = CENTER + thumbRadius * Math.sin(thetaRad) - 12;
+  const wheelThumbY = CENTER - thumbRadius * Math.cos(thetaRad) - 12;
+  const briThumbX = Math.max(0, Math.min(sliderWidth - 20, (currentBrightness / 100) * sliderWidth - 10));
+
+  return (
+    <View style={dynamicStyles.panelContainer}>
+      {/* ─── Chroma Header ─── */}
+      <View style={dynamicStyles.panelHeaderRow}>
+        <View style={dynamicStyles.panelTitleGroup}>
+          <View style={[dynamicStyles.headerColorDot, { backgroundColor: currentColor }]} />
+          <Text style={dynamicStyles.panelTitle}>CHROMA COLOR WHEEL</Text>
+        </View>
+
+        <TouchableOpacity
+          style={dynamicStyles.activeModeBadge}
+          onPress={() => setActiveTab(activeTab === 'wheel' ? 'effects' : 'wheel')}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name={activeTab === 'wheel' ? 'sparkles-outline' : 'color-palette-outline'}
+            size={13}
+            color={colors.primary}
+          />
+          <Text style={dynamicStyles.activeModeBadgeText}>
+            {activeTab === 'wheel' ? `Mode: ${activeEffectObj.name}` : 'Color Wheel'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ─── TAB 1: SVG Chroma Wheel & Sliders ─── */}
+      {activeTab === 'wheel' && (
+        <View style={dynamicStyles.wheelTabBody}>
+          {/* 1. Continuous SVG Chroma Color Wheel */}
+          <View style={dynamicStyles.wheelCenterWrapper}>
+            <View
+              style={[dynamicStyles.wheelTouchBox, { width: WHEEL_SIZE, height: WHEEL_SIZE }]}
+              {...wheelPanResponder.panHandlers}
+            >
+              <Svg width={WHEEL_SIZE} height={WHEEL_SIZE} viewBox={`0 0 ${WHEEL_SIZE} ${WHEEL_SIZE}`}>
+                <Defs>
+                  {/* Radial White Saturation Center Fade */}
+                  <SvgRadialGradient id="chromaCenterFade" cx="50%" cy="50%" rx="50%" ry="50%" fx="50%" fy="50%">
+                    <Stop offset="0%" stopColor="#FFFFFF" stopOpacity="1" />
+                    <Stop offset="25%" stopColor="#FFFFFF" stopOpacity="0.88" />
+                    <Stop offset="65%" stopColor="#FFFFFF" stopOpacity="0.38" />
+                    <Stop offset="100%" stopColor="#FFFFFF" stopOpacity="0" />
+                  </SvgRadialGradient>
+                </Defs>
+
+                {/* 96 Chromatic Wedges */}
+                <G>
+                  {svgWheelPaths.map((p) => (
+                    <Path key={p.key} d={p.d} fill={p.fill} />
+                  ))}
+                </G>
+
+                {/* Concentric Saturation Overlay */}
+                <Circle cx={CENTER} cy={CENTER} r={RADIUS} fill="url(#chromaCenterFade)" />
+
+                {/* Wheel Edge Rim */}
+                <Circle
+                  cx={CENTER}
+                  cy={CENTER}
+                  r={RADIUS - 0.5}
+                  stroke={colors.surfaceBorder}
+                  strokeWidth="1.5"
+                  fill="none"
+                />
+              </Svg>
+
+              {/* Draggable Selector Knob Ring */}
+              <View
+                style={[
+                  dynamicStyles.wheelThumbKnob,
+                  { left: wheelThumbX, top: wheelThumbY },
+                ]}
+                pointerEvents="none"
+              >
+                <View style={[dynamicStyles.thumbInnerDot, { backgroundColor: currentColor }]} />
+              </View>
+            </View>
+          </View>
+
+          {/* 2. Master Luminance / Brightness Slider */}
+          <View style={dynamicStyles.sliderBlock}>
+            <View style={dynamicStyles.sliderLabelRow}>
+              <View style={dynamicStyles.briLabelGroup}>
+                <Ionicons name="sunny-outline" size={13} color={colors.textSecondary} />
+                <Text style={dynamicStyles.sliderLabel}>Brightness</Text>
+              </View>
+              <Text style={dynamicStyles.sliderValueText}>{currentBrightness}%</Text>
+            </View>
+
+            <View
+              style={dynamicStyles.sliderTrackBox}
+              onLayout={(e) => {
+                const w = e.nativeEvent.layout.width;
+                if (w > 0) setSliderWidth(w);
+              }}
+              {...brightnessPanResponder.panHandlers}
+            >
+              <Svg width="100%" height={16} style={dynamicStyles.svgSliderTrack}>
+                <Defs>
+                  <SvgLinearGradient id="chromaBriGrad" x1="0" y1="0" x2="1" y2="0">
+                    <Stop offset="0" stopColor="#000000" />
+                    <Stop offset="1" stopColor={currentColor} />
+                  </SvgLinearGradient>
+                </Defs>
+                <Rect x="0" y="0" width="100%" height="100%" rx={8} ry={8} fill="url(#chromaBriGrad)" />
+              </Svg>
+
+              <View
+                style={[
+                  dynamicStyles.sliderThumbKnob,
+                  { left: briThumbX, backgroundColor: '#FFFFFF' },
+                ]}
+                pointerEvents="none"
+              />
+            </View>
+          </View>
+
+          {/* 3. Warmth / White Temperature Balance Slider */}
+          <View style={dynamicStyles.sliderBlock}>
+            <View style={dynamicStyles.sliderLabelRow}>
+              <View style={dynamicStyles.briLabelGroup}>
+                <Ionicons name="thermometer-outline" size={13} color={colors.textSecondary} />
+                <Text style={dynamicStyles.sliderLabel}>Warmth / White Balance</Text>
+              </View>
+              <Text style={dynamicStyles.sliderValueText}>2200K – 6500K</Text>
+            </View>
+
+            <View
+              style={dynamicStyles.sliderTrackBox}
+              {...warmthPanResponder.panHandlers}
+            >
+              <Svg width="100%" height={16} style={dynamicStyles.svgSliderTrack}>
+                <Defs>
+                  <SvgLinearGradient id="chromaWarmthGrad" x1="0" y1="0" x2="1" y2="0">
+                    <Stop offset="0" stopColor="#FFA54F" />
+                    <Stop offset="0.3" stopColor="#FFE4CE" />
+                    <Stop offset="0.65" stopColor="#FFFFFF" />
+                    <Stop offset="1" stopColor="#D6E8FF" />
+                  </SvgLinearGradient>
+                </Defs>
+                <Rect x="0" y="0" width="100%" height="100%" rx={8} ry={8} fill="url(#chromaWarmthGrad)" />
+              </Svg>
+            </View>
+          </View>
+
+          {/* 4. Format Switcher & Value Inspector (HEX / RGB / HSL) */}
+          <View style={dynamicStyles.inspectorCard}>
+            <View style={dynamicStyles.formatTabsRow}>
+              <View style={dynamicStyles.formatTogglePills}>
+                {(['HEX', 'RGB', 'HSL'] as const).map((fmt) => (
+                  <TouchableOpacity
+                    key={fmt}
+                    style={[
+                      dynamicStyles.formatPill,
+                      formatMode === fmt && dynamicStyles.formatPillActive,
+                    ]}
+                    onPress={() => setFormatMode(fmt)}
+                    activeOpacity={0.75}
+                  >
+                    <Text
+                      style={[
+                        dynamicStyles.formatPillText,
+                        formatMode === fmt && dynamicStyles.formatPillTextActive,
+                      ]}
+                    >
+                      {fmt}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <View style={dynamicStyles.liveColorPill}>
+                <View style={[dynamicStyles.previewDot, { backgroundColor: currentColor }]} />
+                <Text style={dynamicStyles.liveHexText}>{currentColor.toUpperCase()}</Text>
+              </View>
+            </View>
+
+            {/* Mode-Specific Field Render */}
+            {formatMode === 'HEX' && (
+              <View style={dynamicStyles.hexInputRow}>
+                <TextInput
+                  style={dynamicStyles.hexInput}
+                  value={customHex}
+                  onChangeText={(t) => setCustomHex(t.startsWith('#') ? t : `#${t}`)}
+                  maxLength={7}
+                  autoCapitalize="characters"
+                  placeholder="#FF6B00"
+                  placeholderTextColor={colors.inputPlaceholder}
+                />
+                <TouchableOpacity
+                  style={dynamicStyles.hexSubmitBtn}
+                  onPress={() => {
+                    if (customHex.match(/^#[0-9A-Fa-f]{6}$/)) {
+                      onColorChange(customHex);
+                    }
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={dynamicStyles.hexSubmitBtnText}>Apply</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {formatMode === 'RGB' && (
+              <View style={dynamicStyles.numericChipsRow}>
+                <View style={dynamicStyles.numChip}>
+                  <Text style={dynamicStyles.numChipLabel}>R</Text>
+                  <Text style={dynamicStyles.numChipValue}>{rgb.r}</Text>
+                </View>
+                <View style={dynamicStyles.numChip}>
+                  <Text style={dynamicStyles.numChipLabel}>G</Text>
+                  <Text style={dynamicStyles.numChipValue}>{rgb.g}</Text>
+                </View>
+                <View style={dynamicStyles.numChip}>
+                  <Text style={dynamicStyles.numChipLabel}>B</Text>
+                  <Text style={dynamicStyles.numChipValue}>{rgb.b}</Text>
+                </View>
+              </View>
+            )}
+
+            {formatMode === 'HSL' && (
+              <View style={dynamicStyles.numericChipsRow}>
+                <View style={dynamicStyles.numChip}>
+                  <Text style={dynamicStyles.numChipLabel}>H</Text>
+                  <Text style={dynamicStyles.numChipValue}>{hsl.h}°</Text>
+                </View>
+                <View style={dynamicStyles.numChip}>
+                  <Text style={dynamicStyles.numChipLabel}>S</Text>
+                  <Text style={dynamicStyles.numChipValue}>{hsl.s}%</Text>
+                </View>
+                <View style={dynamicStyles.numChip}>
+                  <Text style={dynamicStyles.numChipLabel}>L</Text>
+                  <Text style={dynamicStyles.numChipValue}>{hsl.l}%</Text>
+                </View>
+              </View>
+            )}
+          </View>
+
+          {/* 5. Chroma Curated Palette Swatches */}
+          <View style={dynamicStyles.paletteSection}>
+            <Text style={dynamicStyles.paletteHeading}>Quick Palette Swatches</Text>
+            
+            {/* Row 1 Swatches */}
+            <View style={dynamicStyles.swatchesRow}>
+              {CHROMA_PALETTE_ROW1.map((swatch) => {
+                const isSelected = currentColor.toLowerCase() === swatch.hex.toLowerCase();
+                return (
+                  <TouchableOpacity
+                    key={swatch.hex}
+                    style={[
+                      dynamicStyles.swatchPill,
+                      { backgroundColor: swatch.hex },
+                      isSelected && dynamicStyles.swatchPillSelected,
+                    ]}
+                    onPress={() => onColorChange(swatch.hex)}
+                    activeOpacity={0.8}
+                  />
+                );
+              })}
+            </View>
+
+            {/* Row 2 Swatches */}
+            <View style={dynamicStyles.swatchesRow}>
+              {CHROMA_PALETTE_ROW2.map((swatch) => {
+                const isSelected = currentColor.toLowerCase() === swatch.hex.toLowerCase();
+                return (
+                  <TouchableOpacity
+                    key={swatch.hex}
+                    style={[
+                      dynamicStyles.swatchPill,
+                      { backgroundColor: swatch.hex },
+                      isSelected && dynamicStyles.swatchPillSelected,
+                    ]}
+                    onPress={() => onColorChange(swatch.hex)}
+                    activeOpacity={0.8}
+                  />
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* ─── TAB 2: Dynamic Lighting Effects ─── */}
+      {activeTab === 'effects' && (
+        <View style={dynamicStyles.effectsTabBody}>
+          <Text style={dynamicStyles.effectsHeading}>Dynamic Animation Modes</Text>
+          <View style={dynamicStyles.effectsList}>
+            {CHROMA_EFFECTS.map((eff) => {
+              const isActive = currentMode === eff.id;
+              return (
+                <TouchableOpacity
+                  key={eff.id}
+                  style={[
+                    dynamicStyles.effectCard,
+                    isActive && dynamicStyles.effectCardActive,
+                  ]}
+                  onPress={() => onModeChange(eff.id)}
+                  activeOpacity={0.75}
+                >
+                  <View style={[dynamicStyles.effectIconBox, isActive && dynamicStyles.effectIconBoxActive]}>
+                    <Ionicons
+                      name={eff.icon as any}
+                      size={18}
+                      color={isActive ? (isDark ? '#000000' : '#FFFFFF') : colors.textSecondary}
+                    />
+                  </View>
+                  <View style={dynamicStyles.effectInfoBox}>
+                    <Text style={[dynamicStyles.effectName, isActive && dynamicStyles.effectNameActive]}>
+                      {eff.name}
+                    </Text>
+                    <Text style={dynamicStyles.effectDesc}>{eff.desc}</Text>
+                  </View>
+                  {isActive && (
+                    <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      )}
+
+      {/* ─── Bottom Studio Tab Navigation (Wheel | Effects) ─── */}
+      <View style={dynamicStyles.bottomNavRow}>
+        <TouchableOpacity
+          style={[dynamicStyles.tabBtn, activeTab === 'wheel' && dynamicStyles.tabBtnActive]}
+          onPress={() => setActiveTab('wheel')}
+          activeOpacity={0.75}
+        >
+          <Ionicons
+            name="color-palette-outline"
+            size={16}
+            color={activeTab === 'wheel' ? (isDark ? '#FFFFFF' : colors.primary) : colors.textMuted}
+          />
+          <Text style={[dynamicStyles.tabBtnText, activeTab === 'wheel' && dynamicStyles.tabBtnTextActive]}>
+            Chroma Wheel
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[dynamicStyles.tabBtn, activeTab === 'effects' && dynamicStyles.tabBtnActive]}
+          onPress={() => setActiveTab('effects')}
+          activeOpacity={0.75}
+        >
+          <Ionicons
+            name="sparkles-outline"
+            size={16}
+            color={activeTab === 'effects' ? (isDark ? '#FFFFFF' : colors.primary) : colors.textMuted}
+          />
+          <Text style={[dynamicStyles.tabBtnText, activeTab === 'effects' && dynamicStyles.tabBtnTextActive]}>
+            Lighting Modes
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+function getChromaDynamicStyles(colors: any, isDark: boolean) {
+  return StyleSheet.create({
+    panelContainer: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      marginBottom: 16,
+    },
+    panelHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 14,
+    },
+    panelTitleGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    headerColorDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+    },
+    panelTitle: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '800',
+      letterSpacing: 1,
+    },
+    activeModeBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.05)',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    activeModeBadgeText: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    wheelTabBody: {
+      gap: 14,
+      alignItems: 'center',
+      width: '100%',
+    },
+    // SVG Circular Chroma Wheel
+    wheelCenterWrapper: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginVertical: 4,
+    },
+    wheelTouchBox: {
+      position: 'relative',
+      borderRadius: 120,
+      overflow: 'hidden',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    wheelThumbKnob: {
+      position: 'absolute',
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      borderWidth: 2.5,
+      borderColor: '#FFFFFF',
+      backgroundColor: '#000000',
+      alignItems: 'center',
+      justifyContent: 'center',
+      elevation: 4,
+    },
+    thumbInnerDot: {
+      width: 9,
+      height: 9,
+      borderRadius: 4.5,
+    },
+    // Sliders
+    sliderBlock: {
+      width: '100%',
+      gap: 6,
+    },
+    sliderLabelRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    briLabelGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+    },
+    sliderLabel: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    sliderValueText: {
+      color: colors.text,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    sliderTrackBox: {
+      height: 24,
+      justifyContent: 'center',
+      position: 'relative',
+      width: '100%',
+    },
+    svgSliderTrack: {
+      width: '100%',
+      height: 16,
+      borderRadius: 8,
+    },
+    sliderThumbKnob: {
+      position: 'absolute',
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      borderWidth: 2,
+      borderColor: '#FFFFFF',
+      top: 2,
+      elevation: 3,
+    },
+    // Inspector
+    inspectorCard: {
+      width: '100%',
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : colors.cardSecondary,
+      borderRadius: Layout.radius.md,
+      padding: 10,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      gap: 10,
+    },
+    formatTabsRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    formatTogglePills: {
+      flexDirection: 'row',
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.05)',
+      borderRadius: 6,
+      padding: 2,
+      gap: 2,
+    },
+    formatPill: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 4,
+    },
+    formatPillActive: {
+      backgroundColor: colors.primary,
+    },
+    formatPillText: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    formatPillTextActive: {
+      color: isDark ? '#000000' : '#FFFFFF',
+    },
+    liveColorPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    previewDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    liveHexText: {
+      color: colors.text,
+      fontSize: 12,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
+    hexInputRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    hexInput: {
+      flex: 1,
+      height: 34,
+      backgroundColor: colors.inputBackground,
+      borderRadius: Layout.radius.sm,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+      color: colors.text,
+      fontSize: 12,
+      fontWeight: '700',
+      paddingHorizontal: 10,
+      letterSpacing: 1,
+    },
+    hexSubmitBtn: {
+      backgroundColor: colors.primary,
+      paddingHorizontal: 14,
+      height: 34,
+      borderRadius: Layout.radius.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    hexSubmitBtnText: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    numericChipsRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    numChip: {
+      flex: 1,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.04)',
+      borderRadius: 6,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    numChipLabel: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    numChipValue: {
+      color: colors.text,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    // Swatches
+    paletteSection: {
+      width: '100%',
+      gap: 8,
+    },
+    paletteHeading: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    swatchesRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      width: '100%',
+    },
+    swatchPill: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      borderWidth: 1.5,
+      borderColor: colors.surfaceBorder,
+    },
+    swatchPillSelected: {
+      borderColor: colors.primary,
+      borderWidth: 2.5,
+      transform: [{ scale: 1.15 }],
+    },
+    // Effects Tab
+    effectsTabBody: {
+      gap: 8,
+      paddingVertical: 4,
+    },
+    effectsHeading: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '700',
+      marginBottom: 6,
+    },
+    effectsList: {
+      gap: 8,
+    },
+    effectCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.04)' : colors.cardSecondary,
+      borderRadius: Layout.radius.md,
+      padding: 10,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      gap: 12,
+    },
+    effectCardActive: {
+      borderColor: colors.primary,
+      backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.1)',
+    },
+    effectIconBox: {
+      width: 34,
+      height: 34,
+      borderRadius: 8,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    effectIconBoxActive: {
+      backgroundColor: colors.primary,
+    },
+    effectInfoBox: {
+      flex: 1,
+    },
+    effectName: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    effectNameActive: {
+      color: colors.primary,
+      fontWeight: '700',
+    },
+    effectDesc: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    // Bottom Tab switcher
+    bottomNavRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 14,
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: colors.surfaceBorder,
+    },
+    tabBtn: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 8,
+      borderRadius: Layout.radius.sm,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.04)',
+      gap: 6,
+    },
+    tabBtnActive: {
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)',
+    },
+    tabBtnText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    tabBtnTextActive: {
+      color: isDark ? '#FFFFFF' : colors.primary,
+      fontWeight: '700',
+    },
+  });
+}
 
 export default function DeviceDetailScreen() {
   const { id, classroomId } = useLocalSearchParams<{ id: string; classroomId: string }>();
@@ -181,11 +1231,9 @@ export default function DeviceDetailScreen() {
     if (isOffline) return 'OFFLINE';
     if (isCurtain) return isOn ? 'OPEN (90°)' : 'CLOSED (0°)';
     if (isFan) return isOn ? 'RUNNING' : 'STOPPED';
-    if (isRgb) return isOn ? `ACTIVE (${currentColor})` : 'TURNED OFF';
+    if (isRgb) return isOn ? 'POWERED ON' : 'TURNED OFF';
     return isOn ? 'POWERED ON' : 'TURNED OFF';
   };
-
-  const activeAccentColor = isRgb ? currentColor : colors.primary;
 
   return (
     <View style={styles.container}>
@@ -193,250 +1241,89 @@ export default function DeviceDetailScreen() {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Main Power / Position Card */}
-        <View style={[
-          styles.powerCard, 
-          isOn && styles.powerCardActive,
-          isOn && isRgb && { borderColor: currentColor, backgroundColor: `${currentColor}12` }
-        ]}>
+        <View style={styles.powerCard}>
           <View style={styles.powerCardHeader}>
             <View style={[
               styles.deviceIconLarge, 
               isOn && styles.deviceIconLargeActive,
-              isOn && isRgb && { backgroundColor: `${currentColor}25` }
             ]}>
-              <Ionicons name={getIcon() as any} size={32} color={isOn ? activeAccentColor : colors.text} />
+              <Ionicons
+                name={getIcon() as any}
+                size={26}
+                color={isOn ? colors.primary : colors.textMuted}
+              />
             </View>
             <View style={styles.powerInfo}>
               <Text style={styles.deviceName}>{device.name}</Text>
               <Text style={styles.deviceLocation}>{classroom.name} • {device.roomArea}</Text>
               <View style={styles.statusBadgeRow}>
-                <View style={[styles.dot, { backgroundColor: isOffline ? colors.critical : isOn ? (isRgb ? currentColor : colors.success) : colors.textMuted }]} />
-                <Text style={[styles.statusText, { color: isOffline ? colors.critical : isOn ? (isRgb ? currentColor : colors.success) : colors.textMuted }]}>
+                <View style={[styles.dot, { backgroundColor: isOffline ? colors.critical : isOn ? colors.success : colors.textMuted }]} />
+                <Text style={[styles.statusText, { color: isOffline ? colors.critical : isOn ? colors.success : colors.textMuted }]}>
                   {getStatusLabel()}
                 </Text>
               </View>
             </View>
           </View>
 
-          <View style={styles.powerToggleRow}>
-            <Text style={styles.powerLabel}>
-              {isCurtain ? (isOn ? 'OPEN' : 'CLOSED') : (isOn ? 'ACTIVE' : 'INACTIVE')}
-            </Text>
-            <Switch
-              value={isOn}
-              onValueChange={() => toggleDevice(classroom.id, device.id)}
-              disabled={isOffline}
-              trackColor={{ false: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)', true: activeAccentColor }}
-              thumbColor={isOn ? '#FFF' : (isDark ? '#DDD' : '#F1F5F9')}
-            />
+          {/* Unified Manual Power Controls */}
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              style={[styles.actionButton, isOn && styles.actionButtonActive]}
+              onPress={() => {
+                if (!isOn) toggleDevice(classroom.id, device.id);
+              }}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={isCurtain ? 'scan-outline' : 'power'}
+                size={17}
+                color={isOn ? (isDark ? '#000000' : '#FFFFFF') : colors.text}
+              />
+              <Text style={[styles.actionButtonText, isOn && styles.actionButtonTextActive]}>
+                {isCurtain ? 'Open Curtain' : 'Turn On'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.actionButton, !isOn && styles.actionButtonActive]}
+              onPress={() => {
+                if (isOn) toggleDevice(classroom.id, device.id);
+              }}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={isCurtain ? 'close-circle-outline' : 'power-outline'}
+                size={17}
+                color={!isOn ? (isDark ? '#000000' : '#FFFFFF') : colors.text}
+              />
+              <Text style={[styles.actionButtonText, !isOn && styles.actionButtonTextActive]}>
+                {isCurtain ? 'Close Curtain' : 'Turn Off'}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
-        {/* ─── WS2812B 15-LED Physical Strip Visualizer ─── */}
+        {/* ─── Chroma Panel Color Studio (2D Canvas, Sliders, Palette, Format Switcher, Effects) ─── */}
         {isRgb && (
-          <View style={[styles.rgbVisualizerCard, { borderColor: isOn ? `${currentColor}40` : colors.surfaceBorder }]}>
-            <View style={styles.rgbVisualizerHeader}>
-              <View style={styles.rgbBadge}>
-                <Ionicons name="sparkles" size={14} color={isOn ? currentColor : colors.textMuted} />
-                <Text style={[styles.rgbBadgeText, { color: isOn ? currentColor : colors.textMuted }]}>
-                  15x WS2812B Addressable LEDs
-                </Text>
-              </View>
-              <Text style={[styles.rgbLiveText, { color: isOn ? currentColor : colors.textMuted }]}>
-                {isOn ? `${currentBrightness}% • ${currentColor.toUpperCase()}` : 'STRIP OFF'}
-              </Text>
-            </View>
-
-            {/* Simulated 15-LED PCB strip with glowing diodes */}
-            <View style={styles.ledStripBar}>
-              {Array.from({ length: 15 }).map((_, idx) => {
-                const ledOpacity = isOn ? Math.max(0.25, currentBrightness / 100) : 0.15;
-                const isLit = isOn && !isOffline;
-                return (
-                  <View key={idx} style={styles.ledPixelWrapper}>
-                    <View
-                      style={[
-                        styles.ledPixelDot,
-                        {
-                          backgroundColor: isLit ? currentColor : (isDark ? '#262626' : '#D1D5DB'),
-                          opacity: ledOpacity,
-                          shadowColor: isLit ? currentColor : 'transparent',
-                          shadowOpacity: isLit ? 0.9 : 0,
-                          shadowRadius: isLit ? 6 : 0,
-                          elevation: isLit ? 4 : 0,
-                        },
-                      ]}
-                    />
-                    <Text style={styles.ledPixelIndex}>{idx + 1}</Text>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-        )}
-
-        {/* ─── WS2812B Color Palette & Live Picker ─── */}
-        {isRgb && (
-          <View style={styles.rgbColorCard}>
-            <View style={styles.cardHeaderRow}>
-              <View style={styles.cardTitleBox}>
-                <View style={[styles.iconPill, { backgroundColor: `${currentColor}25` }]}>
-                  <Ionicons name="color-palette" size={18} color={currentColor} />
-                </View>
-                <View>
-                  <Text style={styles.cardTitle}>Color Palette</Text>
-                  <Text style={styles.cardSubtitle}>Select vibrant ambient lighting for corridor</Text>
-                </View>
-              </View>
-              <View style={[styles.colorPreviewBubble, { backgroundColor: currentColor }]} />
-            </View>
-
-            {/* Presets Grid */}
-            <View style={styles.colorPresetsGrid}>
-              {RGB_PRESETS.map(p => {
-                const isSelected = currentColor.toLowerCase() === p.hex.toLowerCase();
-                return (
-                  <TouchableOpacity
-                    key={p.hex}
-                    style={[
-                      styles.colorPresetItem,
-                      isSelected && { borderColor: colors.text, transform: [{ scale: 1.08 }] }
-                    ]}
-                    onPress={() => handleColorChange(p.hex)}
-                    activeOpacity={0.75}
-                  >
-                    <View style={[styles.colorSwatchCircle, { backgroundColor: p.hex }]}>
-                      {isSelected && (
-                        <Ionicons 
-                          name="checkmark" 
-                          size={14} 
-                          color={p.hex === '#FFFFFF' || p.hex === '#FFF2DF' || p.hex === '#E0F7FA' ? '#000000' : '#FFFFFF'} 
-                        />
-                      )}
-                    </View>
-                    <Text style={[styles.colorPresetLabel, isSelected && { color: colors.text, fontWeight: '700' }]} numberOfLines={1}>
-                      {p.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {/* Custom Hex Color Input */}
-            <View style={styles.hexInputRow}>
-              <View style={[styles.hexInputSwatch, { backgroundColor: customHex.match(/^#[0-9A-Fa-f]{6}$/) ? customHex : currentColor }]} />
-              <TextInput
-                style={styles.hexInput}
-                value={customHex}
-                onChangeText={(text) => {
-                  const cleaned = text.startsWith('#') ? text : `#${text}`;
-                  setCustomHex(cleaned);
-                }}
-                placeholder="#FF6B00"
-                placeholderTextColor={colors.inputPlaceholder}
-                maxLength={7}
-                autoCapitalize="characters"
-              />
-              <TouchableOpacity
-                style={[styles.applyHexBtn, { backgroundColor: activeAccentColor }]}
-                onPress={() => {
-                  if (customHex.match(/^#[0-9A-Fa-f]{6}$/)) {
-                    handleColorChange(customHex);
-                  }
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.applyHexBtnText}>Apply Hex</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {/* ─── WS2812B Brightness & Effects Controls ─── */}
-        {isRgb && (
-          <View style={styles.rgbSettingsCard}>
-            <View style={styles.cardHeaderRow}>
-              <View style={styles.cardTitleBox}>
-                <View style={[styles.iconPill, { backgroundColor: isDark ? 'rgba(253, 168, 58, 0.15)' : 'rgba(217, 119, 6, 0.12)' }]}>
-                  <Ionicons name="sunny" size={18} color={colors.primary} />
-                </View>
-                <View>
-                  <Text style={styles.cardTitle}>Brightness ({currentBrightness}%)</Text>
-                  <Text style={styles.cardSubtitle}>Dim or brighten the 15-LED strip output</Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.brightnessControlsRow}>
-              <TouchableOpacity
-                style={styles.brightnessStepBtn}
-                onPress={() => handleBrightnessChange(currentBrightness - 10)}
-                disabled={currentBrightness <= 10}
-              >
-                <Ionicons name="remove" size={20} color={colors.text} />
-              </TouchableOpacity>
-
-              <View style={styles.brightnessChipsGroup}>
-                {[25, 50, 75, 100].map(pct => {
-                  const isActive = currentBrightness === pct;
-                  return (
-                    <TouchableOpacity
-                      key={pct}
-                      style={[styles.brightnessChip, isActive && { backgroundColor: colors.primary, borderColor: colors.primary }]}
-                      onPress={() => handleBrightnessChange(pct)}
-                    >
-                      <Text style={[styles.brightnessChipText, isActive && { color: isDark ? '#000000' : '#FFFFFF', fontWeight: '700' }]}>
-                        {pct}%
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <TouchableOpacity
-                style={styles.brightnessStepBtn}
-                onPress={() => handleBrightnessChange(currentBrightness + 10)}
-                disabled={currentBrightness >= 100}
-              >
-                <Ionicons name="add" size={20} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Lighting Effects Modes */}
-            <Text style={[styles.loadEditLabel, { marginTop: 18, marginBottom: 8 }]}>Animation / Lighting Mode:</Text>
-            <View style={styles.rgbModesGrid}>
-              {RGB_MODES.map(m => {
-                const isActive = currentRgbMode === m.id;
-                return (
-                  <TouchableOpacity
-                    key={m.id}
-                    style={[
-                      styles.rgbModeCard,
-                      isActive && { borderColor: currentColor, backgroundColor: `${currentColor}15` }
-                    ]}
-                    onPress={() => handleModeChange(m.id)}
-                    activeOpacity={0.75}
-                  >
-                    <Ionicons 
-                      name={m.icon as any} 
-                      size={18} 
-                      color={isActive ? currentColor : colors.textMuted} 
-                    />
-                    <Text style={[styles.rgbModeLabel, isActive && { color: currentColor, fontWeight: '700' }]}>
-                      {m.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
+          <ChromaPanelColorStudio
+            currentColor={currentColor}
+            currentBrightness={currentBrightness}
+            currentMode={currentRgbMode}
+            isOn={isOn}
+            onColorChange={handleColorChange}
+            onBrightnessChange={handleBrightnessChange}
+            onModeChange={handleModeChange}
+            onTogglePower={() => toggleDevice(classroom.id, device.id)}
+            colors={colors}
+            isDark={isDark}
+          />
         )}
 
         {/* Stats Row */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <Text style={styles.statLabel}>Current Draw</Text>
-            <Text style={[styles.statValue, { color: isOn ? activeAccentColor : colors.text }]}>
+            <Text style={[styles.statValue, { color: isOn ? colors.primary : colors.text }]}>
               {device.powerUsage || 0}W
             </Text>
           </View>
@@ -550,39 +1437,6 @@ export default function DeviceDetailScreen() {
           )}
         </View>
 
-        {/* Quick Action Control Buttons */}
-        <View style={styles.actionCard}>
-          <Text style={styles.actionTitle}>Manual Control</Text>
-          <Text style={styles.actionSubtitle}>Apply immediate state change to this appliance</Text>
-          <View style={styles.buttonRow}>
-            <TouchableOpacity
-              style={[styles.actionButton, isOn && styles.actionButtonActive]}
-              onPress={() => {
-                if (!isOn) toggleDevice(classroom.id, device.id);
-              }}
-              activeOpacity={0.8}
-            >
-              <Ionicons name={isCurtain ? 'scan-outline' : 'power'} size={18} color={isOn ? (isDark ? '#000000' : '#FFFFFF') : colors.text} />
-              <Text style={[styles.actionButtonText, isOn && styles.actionButtonTextActive]}>
-                {isCurtain ? 'Open Curtain' : 'Turn On'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionButton, !isOn && styles.actionButtonActive]}
-              onPress={() => {
-                if (isOn) toggleDevice(classroom.id, device.id);
-              }}
-              activeOpacity={0.8}
-            >
-              <Ionicons name={isCurtain ? 'close-circle-outline' : 'power-outline'} size={18} color={!isOn ? (isDark ? '#000000' : '#FFFFFF') : colors.text} />
-              <Text style={[styles.actionButtonText, !isOn && styles.actionButtonTextActive]}>
-                {isCurtain ? 'Close Curtain' : 'Turn Off'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
         {/* Appliance & Control Specs */}
         <View style={styles.infoCard}>
           <Text style={styles.infoTitle}>Appliance Details</Text>
@@ -652,31 +1506,30 @@ function getStyles(colors: any, isDark: boolean) {
     powerCard: {
       backgroundColor: colors.card,
       borderRadius: Layout.radius.lg,
-      padding: 20,
+      padding: 18,
       borderWidth: 1,
       borderColor: colors.surfaceBorder,
       marginBottom: 16,
     },
-    powerCardActive: {
-      borderColor: colors.primary,
-      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.05)' : 'rgba(217, 119, 6, 0.05)',
-    },
     powerCardHeader: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: 20,
+      marginBottom: 16,
     },
     deviceIconLarge: {
-      width: 56,
-      height: 56,
-      borderRadius: 28,
-      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)',
       justifyContent: 'center',
       alignItems: 'center',
-      marginRight: 16,
+      marginRight: 14,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
     },
     deviceIconLargeActive: {
       backgroundColor: isDark ? 'rgba(253, 168, 58, 0.15)' : 'rgba(217, 119, 6, 0.12)',
+      borderColor: colors.primary,
     },
     powerInfo: {
       flex: 1,
@@ -707,19 +1560,34 @@ function getStyles(colors: any, isDark: boolean) {
       fontWeight: '700',
       letterSpacing: 0.5,
     },
-    powerToggleRow: {
+    buttonRow: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    actionButton: {
+      flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingTop: 16,
-      borderTopWidth: 1,
-      borderTopColor: colors.surfaceBorder,
+      justifyContent: 'center',
+      paddingVertical: 12,
+      borderRadius: Layout.radius.md,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      gap: 8,
     },
-    powerLabel: {
-      color: colors.text,
-      fontSize: 14,
+    actionButtonActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    actionButtonText: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    actionButtonTextActive: {
+      color: isDark ? '#000000' : '#FFFFFF',
       fontWeight: '700',
-      letterSpacing: 1.5,
     },
     statsRow: {
       flexDirection: 'row',
@@ -742,51 +1610,6 @@ function getStyles(colors: any, isDark: boolean) {
     statValue: {
       color: colors.text,
       fontSize: 15,
-      fontWeight: '700',
-    },
-    actionCard: {
-      backgroundColor: colors.card,
-      borderRadius: Layout.radius.lg,
-      padding: 16,
-      borderWidth: 1,
-      borderColor: colors.surfaceBorder,
-      marginBottom: 16,
-    },
-    actionTitle: {
-      color: colors.text,
-      fontSize: 15,
-      fontWeight: '700',
-      marginBottom: 4,
-    },
-    actionSubtitle: {
-      color: colors.textMuted,
-      fontSize: 12,
-      marginBottom: 14,
-    },
-    buttonRow: {
-      flexDirection: 'row',
-      gap: 10,
-    },
-    actionButton: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 14,
-      borderRadius: Layout.radius.md,
-      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : colors.cardSecondary,
-      gap: 8,
-    },
-    actionButtonActive: {
-      backgroundColor: colors.primary,
-    },
-    actionButtonText: {
-      color: colors.textSecondary,
-      fontSize: 13,
-      fontWeight: '600',
-    },
-    actionButtonTextActive: {
-      color: isDark ? '#000000' : '#FFFFFF',
       fontWeight: '700',
     },
     infoCard: {

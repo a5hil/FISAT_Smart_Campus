@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { Platform, StatusBar as RNStatusBar } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationBar } from 'expo-navigation-bar';
+import * as NavigationBar from 'expo-navigation-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { AppProvider, useApp } from '../context/AppContext';
@@ -20,7 +20,9 @@ function AppContent() {
   useEffect(() => {
     if (Platform.OS === 'android') {
       RNStatusBar.setBackgroundColor(colors.background, true);
-      NavigationBar.setStyle(isDark ? 'dark' : 'light');
+      try {
+        NavigationBar.setStyle(isDark ? 'dark' : 'light');
+      } catch {}
     }
     RNStatusBar.setBarStyle(isDark ? 'light-content' : 'dark-content', true);
   }, [isDark, colors.background]);
@@ -28,7 +30,6 @@ function AppContent() {
   return (
     <SafeAreaProvider style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <NavigationBar style={isDark ? 'dark' : 'light'} />
       <Stack
         screenOptions={{
           headerShown: false,
@@ -36,6 +37,7 @@ function AppContent() {
           animation: 'slide_from_right',
         }}
       >
+        <Stack.Screen name="index" />
         <Stack.Screen name="sign-in" />
         <Stack.Screen name="sign-up" />
         <Stack.Screen name="forget-password" />
