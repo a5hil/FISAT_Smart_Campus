@@ -1098,7 +1098,17 @@ export default function DeviceDetailScreen() {
 
   const currentColor = device.color || '#FF6B00';
   const currentBrightness = device.brightness ?? 80;
-  const currentRgbMode = device.rgbMode || 'solid';
+  const currentRgbMode = device.rgbMode || device.mode || 'solid';
+  const [selectedRgbMode, setSelectedRgbMode] = useState<string>(currentRgbMode);
+  const lastUserModeSelectMsRef = useRef<number>(0);
+
+  useEffect(() => {
+    // Only synchronize from background device updates if user hasn't actively switched mode in last 4s
+    if (device.rgbMode && Date.now() - lastUserModeSelectMsRef.current > 4000) {
+      setSelectedRgbMode(device.rgbMode);
+    }
+  }, [device.rgbMode]);
+
   const [customHex, setCustomHex] = useState(currentColor);
 
   useEffect(() => {
@@ -1264,7 +1274,14 @@ export default function DeviceDetailScreen() {
   };
 
   const handleColorChange = (hex: string) => {
-    updateDeviceValue(classroom.id, device.id, { color: hex, status: 'on' });
+    // If the strip is in an animation mode that overrides color (e.g. fireplace flicker or rainbow wave),
+    // selecting a specific chromatic hue on the color wheel intelligently switches to 'solid' mode
+    const nextMode = (selectedRgbMode === 'fire' || selectedRgbMode === 'rainbow') ? 'solid' : selectedRgbMode;
+    if (nextMode !== selectedRgbMode) {
+      lastUserModeSelectMsRef.current = Date.now();
+      setSelectedRgbMode(nextMode);
+    }
+    updateDeviceValue(classroom.id, device.id, { color: hex, rgbMode: nextMode, status: 'on' });
   };
 
   const handleBrightnessChange = (val: number) => {
@@ -1273,6 +1290,8 @@ export default function DeviceDetailScreen() {
   };
 
   const handleModeChange = (mode: string) => {
+    lastUserModeSelectMsRef.current = Date.now();
+    setSelectedRgbMode(mode);
     updateDeviceValue(classroom.id, device.id, { rgbMode: mode, status: 'on' });
   };
 
@@ -1460,7 +1479,7 @@ export default function DeviceDetailScreen() {
           <ChromaPanelColorStudio
             currentColor={currentColor}
             currentBrightness={currentBrightness}
-            currentMode={currentRgbMode}
+            currentMode={selectedRgbMode}
             isOn={isOn}
             onColorChange={handleColorChange}
             onBrightnessChange={handleBrightnessChange}

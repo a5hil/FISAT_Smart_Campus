@@ -32,6 +32,7 @@
 #include <WebServer.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <WebSocketsClient.h>
 #include <Wire.h>
 #include <time.h>
 #include <sys/time.h>
@@ -189,7 +190,18 @@ void triggerNoticeBeep() {
   Serial.println(F("[BUZZER] Notice announcement chime triggered"));
 }
 
+unsigned long lastLocalBellTriggerMs = 0;
+String lastExecutedBellTs = "";
+bool bellBootLatch = false;
+
 void playBellPattern(const char* pattern) {
+  unsigned long now = millis();
+  if (chimeNoteIndex >= 0 && (now - lastLocalBellTriggerMs < 4000)) {
+    Serial.printf("[BUZZER] Duplicate chime trigger suppressed (active note %d/%d, %lu ms ago)\n",
+                  chimeNoteIndex, chimeNoteCount, now - lastLocalBellTriggerMs);
+    return;
+  }
+  lastLocalBellTriggerMs = now;
   String p = String(pattern);
   p.toLowerCase();
 
@@ -604,6 +616,7 @@ String ws2812_mode = "solid";                      // "solid", "breathe", "rainb
 unsigned long last_ws2812_anim_ms = 0;
 uint16_t ws2812_anim_step = 0;
 bool ws2812_strobe_state = false;
+unsigned long lastWs2812LocalChange = 0;
 
 // Display States for Classroom 1 (A101)
 volatile bool state_c1_smart_screen = true;   // Primary OLED (Telemetry Display on Wire)
@@ -627,7 +640,6 @@ bool cloud_prev_system_auto = false;
 volatile bool pendingModeCloudSync = false;
 volatile bool pendingIpCloudSync = true;
 unsigned long lastLocalModeChange = 0;
-unsigned long lastLocalBellTriggerMs = 0;
 
 // ==========================================
 // --- 24/7 AUTONOMOUS ONBOARD DEVICE SCHEDULING ENGINE ---
@@ -1401,6 +1413,8 @@ void handleApiRgb() {
 
   if (server.hasArg("mode")) {
     ws2812_mode = server.arg("mode");
+    last_ws2812_anim_ms = 0;
+    lastWs2812LocalChange = millis();
   }
 
   if (server.hasArg("plain")) {
@@ -1418,7 +1432,15 @@ void handleApiRgb() {
         int bPct = doc["b"].as<int>();
         ws2812_brightness = map(constrain(bPct, 0, 100), 0, 100, 0, 255);
       }
-      if (doc.containsKey("mode")) ws2812_mode = doc["mode"].as<String>();
+      if (doc.containsKey("mode")) {
+        ws2812_mode = doc["mode"].as<String>();
+        last_ws2812_anim_ms = 0;
+        lastWs2812LocalChange = millis();
+      } else if (doc.containsKey("rgbMode")) {
+        ws2812_mode = doc["rgbMode"].as<String>();
+        last_ws2812_anim_ms = 0;
+        lastWs2812LocalChange = millis();
+      }
     }
   }
 
@@ -1609,38 +1631,49 @@ void applyDeviceControl(String dev, bool st) {
   if (dev == "l1" || dev == "light1" || dev == "dev-a101-light" ||
       dev == "dev-a101-light-1" || dev == "dev-a101-light-2") {
     state_c1_light = st;
+    cloud_prev_c1_light = st;
   } else if (dev == "f1" || dev == "fan1" || dev == "dev-a101-fan" ||
              dev == "dev-a101-fan-1" || dev == "dev-a101-fan-2") {
     state_c1_fan = st;
+    cloud_prev_c1_fan = st;
   } else if (dev == "c1" || dev == "curtain1" || dev == "dev-a101-curtain") {
     state_c1_curtain = st;
+    cloud_prev_c1_curtain = st;
   } else if (dev == "nb" || dev == "notice" || dev == "notice_board" ||
              dev == "dev-a101-notice-board" || dev == "dev-a101-notice") {
     setNoticeScreenPower(st);
+    cloud_prev_c1_notice_board = st;
   } else if (dev == "ss" || dev == "smart" || dev == "smart_screen" ||
              dev == "dev-a101-smart-screen" || dev == "dev-a101-screen") {
     setSmartScreenPower(st);
+    cloud_prev_c1_smart_screen = st;
   }
   // Classroom 2 / A102
   else if (dev == "l2" || dev == "light2" || dev == "dev-a102-light" ||
            dev == "dev-a102-light-1" || dev == "dev-a102-light-2") {
     state_c2_light = st;
+    cloud_prev_c2_light = st;
   } else if (dev == "f2" || dev == "fan2" || dev == "dev-a102-fan" ||
              dev == "dev-a102-fan-1" || dev == "dev-a102-fan-2") {
     state_c2_fan = st;
+    cloud_prev_c2_fan = st;
   } else if (dev == "c2" || dev == "curtain2" || dev == "dev-a102-curtain") {
     state_c2_curtain = st;
+    cloud_prev_c2_curtain = st;
   }
   // Corridors
   else if (dev == "cr1" || dev == "corridor1" || dev == "corr1" ||
            dev == "dev-corr-light1" || dev == "dev-corr-light-1") {
     state_corr1_light = st;
+    cloud_prev_corr1_light = st;
   } else if (dev == "cr2" || dev == "corridor2" || dev == "corr2" ||
-             dev == "dev-corr-light2" || dev == "dev-corr-light-2") {
+           dev == "dev-corr-light2" || dev == "dev-corr-light-2") {
     state_corr2_light = st;
+    cloud_prev_corr2_light = st;
   } else if (dev == "rgb" || dev == "ws2812" || dev == "rgb_strip" ||
              dev == "dev-corr-rgb-strip") {
     state_ws2812 = st;
+    cloud_prev_ws2812 = st;
     updateWs2812Strip();
   }
   // Bulk / Emergency Commands
@@ -1655,6 +1688,21 @@ void applyDeviceControl(String dev, bool st) {
     state_corr2_light = st;
     state_ws2812 = st;
     updateWs2812Strip();
+    setNoticeScreenPower(st);
+    setSmartScreenPower(st);
+
+    // Sync all cloud baseline tracking so upcoming polls do not fight bulk control
+    cloud_prev_c1_light = st;
+    cloud_prev_c1_fan = st;
+    cloud_prev_c1_curtain = st;
+    cloud_prev_c2_light = st;
+    cloud_prev_c2_fan = st;
+    cloud_prev_c2_curtain = st;
+    cloud_prev_corr1_light = st;
+    cloud_prev_corr2_light = st;
+    cloud_prev_ws2812 = st;
+    cloud_prev_c1_notice_board = st;
+    cloud_prev_c1_smart_screen = st;
   }
 
   // Instantly apply relay pin states
@@ -1670,7 +1718,7 @@ void handleControl() {
     bool st = (server.arg("st") == "1" || server.arg("st") == "true" ||
                server.arg("st") == "on");
     if (!server.hasArg("st")) {
-      st = (server.hasArg("color") || server.hasArg("mode") || server.hasArg("b") || server.hasArg("brightness")) ? true : state_ws2812;
+      st = state_ws2812;
     }
 
     if (dev == "rgb" || dev == "ws2812" || dev == "rgb_strip" || dev == "dev-corr-rgb-strip") {
@@ -1687,6 +1735,12 @@ void handleControl() {
       }
       if (server.hasArg("mode")) {
         ws2812_mode = server.arg("mode");
+        last_ws2812_anim_ms = 0;
+        lastWs2812LocalChange = millis();
+      } else if (server.hasArg("rgbMode")) {
+        ws2812_mode = server.arg("rgbMode");
+        last_ws2812_anim_ms = 0;
+        lastWs2812LocalChange = millis();
       }
     }
 
@@ -1738,7 +1792,15 @@ void handleControl() {
           int b = doc["b"].as<int>();
           ws2812_brightness = map(constrain(b, 0, 100), 0, 100, 0, 255);
         }
-        if (doc.containsKey("mode")) ws2812_mode = doc["mode"].as<String>();
+        if (doc.containsKey("mode")) {
+          ws2812_mode = doc["mode"].as<String>();
+          last_ws2812_anim_ms = 0;
+          lastWs2812LocalChange = millis();
+        } else if (doc.containsKey("rgbMode")) {
+          ws2812_mode = doc["rgbMode"].as<String>();
+          last_ws2812_anim_ms = 0;
+          lastWs2812LocalChange = millis();
+        }
       }
     } else {
       // Fallback substring search if JSON is malformed
@@ -3318,6 +3380,239 @@ void setup() {
 
   // 10. Play Startup Chord Arpeggio
   playBootChime();
+
+  // 11. Connect to Supabase Realtime WebSocket for sub-50ms instant remote control
+  if (WiFi.status() == WL_CONNECTED) {
+    initSupabaseRealtimeWS();
+  }
+}
+
+// ==========================================
+// --- SUPABASE REALTIME WEBSOCKET CLIENT ---
+// ==========================================
+// Persistent low-latency push socket via Phoenix Channels over WSS.
+// Delivers sub-50ms instant device actuation when mobile app is on cellular data!
+WebSocketsClient wsClient;
+bool wsConnected = false;
+unsigned long lastWsHeartbeat = 0;
+
+void handleRealtimeWsMessage(const char *data, size_t len) {
+  if (len <= 0) return;
+
+  // Pre-filter: only process Phoenix broadcast messages
+  if (strstr(data, "\"broadcast\"") == NULL) return;
+
+  DynamicJsonDocument doc(4096);
+  DeserializationError err = deserializeJson(doc, data, len);
+  if (err) return;
+
+  const char *ev = doc["event"];
+  if (!ev || strcmp(ev, "broadcast") != 0) return;
+
+  JsonObject pWrapper = doc["payload"];
+  if (!pWrapper.containsKey("payload") || !pWrapper["payload"].is<JsonObject>()) return;
+
+  JsonObject p = pWrapper["payload"];
+  const char *dev = p["dev"];
+  if (!dev) return;
+
+  int st = p["st"] | 0;
+
+  Serial.printf("[REALTIME WS] Instant push command: dev='%s', st=%d\n", dev, st);
+
+  // 1. Instant RTC clock sync from any incoming packet timestamp
+  if (p.containsKey("t")) {
+    unsigned long long tMs = p["t"].as<unsigned long long>();
+    time_t epoch = (time_t)(tMs / 1000ULL);
+    if (epoch > 1700000000) {
+      time_t current = time(nullptr);
+      if (abs((long)(current - epoch)) > 3) {
+        struct timeval tv = { .tv_sec = epoch, .tv_usec = 0 };
+        settimeofday(&tv, NULL);
+        Serial.printf("[TIME] Synced RTC clock from WS packet timestamp: %ld\n", (long)epoch);
+      }
+    }
+  }
+
+  // 2. Direct time synchronization command
+  if (strcmp(dev, "time") == 0) {
+    if (p.containsKey("epoch")) {
+      time_t epoch = (time_t)p["epoch"].as<long>();
+      if (epoch > 1700000000) {
+        struct timeval tv = { .tv_sec = epoch, .tv_usec = 0 };
+        settimeofday(&tv, NULL);
+        Serial.printf("[TIME] Synced RTC clock from WS direct time sync: %ld\n", (long)epoch);
+      }
+    }
+    return;
+  }
+
+  // 3. Digital Notice Board Announcement push (<50ms display + audio chime over mobile data)
+  if (strcmp(dev, "notice") == 0) {
+    const char *nid = p["id"];
+    const char *ncls = p["classroom_id"] | "all";
+    const char *ntitle = p["title"];
+    const char *nmsg = p["message"];
+    const char *ndur = p["duration"] | "24h";
+    if (ntitle && nmsg) {
+      String idStr = nid ? String(nid) : ("ws-" + String(millis()));
+      addOrUpdateNotice(idStr, String(ncls), String(ntitle), String(nmsg), String(ndur), true, true);
+      Serial.printf("[NOTICE] WS push announcement displayed: '%s'\n", ntitle);
+    }
+    return;
+  }
+
+  // 4. Digital Notice Board Announcement deletion
+  if (strcmp(dev, "notice_del") == 0) {
+    const char *nid = p["id"];
+    if (nid) {
+      deleteNoticeById(String(nid));
+      Serial.printf("[NOTICE] WS push announcement deleted: %s\n", nid);
+    }
+    return;
+  }
+
+  // 5. Device Power Schedule instant sync
+  if (strcmp(dev, "sched") == 0) {
+    if (p.containsKey("id") && p.containsKey("schedule")) {
+      const char *devId = p["id"];
+      int sIdx = getDeviceScheduleIndex(String(devId));
+      if (sIdx >= 0) {
+        String serialized;
+        serializeJson(p["schedule"], serialized);
+        parseDeviceSchedule(sIdx, p["schedule"]);
+        preferences.putString(deviceSchedules[sIdx].nvsKey, serialized);
+        Serial.printf("[SCHEDULE] WS push: updated & saved schedule for %s: %s\n", devId, serialized.c_str());
+      }
+    }
+    return;
+  }
+
+  // 6. Timetable & Bell Schedule instant sync
+  if (strcmp(dev, "tt") == 0) {
+    if (p.containsKey("timetable")) {
+      String ttStr;
+      if (p["timetable"].is<JsonObject>() || p["timetable"].is<JsonArray>()) {
+        serializeJson(p["timetable"], ttStr);
+      } else {
+        ttStr = p["timetable"].as<String>();
+      }
+      if (ttStr.length() > 10) {
+        if (parseTimetableJson(ttStr)) {
+          saveTimetableToNVS(ttStr);
+          Serial.printf("[TIMETABLE] WS push: updated & saved %d periods to NVS!\n", timetablePeriodCount);
+        }
+      }
+    }
+    return;
+  }
+
+  if (strcmp(dev, "bell") == 0) {
+    lastLocalBellTriggerMs = millis();
+    if (p.containsKey("ts") && !p["ts"].isNull()) {
+      lastExecutedBellTs = p["ts"].as<String>();
+    } else if (p.containsKey("t") && !p["t"].isNull()) {
+      lastExecutedBellTs = String((unsigned long long)p["t"].as<unsigned long long>());
+    }
+    const char *pat = p["pattern"] | "japanese-school-bell";
+    playBellPattern(pat);
+    return;
+  }
+
+  if (strcmp(dev, "mode") == 0) {
+    setSystemModeInternal(st == 1, true);
+    return;
+  }
+
+  // Any manual device command received via WebSocket switches ESP32 to manual mode
+  if (isAutoMode) {
+    setSystemModeInternal(false, true);
+    Serial.printf("[SYSTEM] WS manual command '%s' -> Switched to MANUAL Mode\n", dev);
+  }
+
+  if (strcmp(dev, "all") == 0 || strcmp(dev, "emergency") == 0) {
+    applyDeviceControl("all", false);
+    return;
+  }
+
+  if (strcmp(dev, "rgb") == 0) {
+    if (p.containsKey("color")) {
+      const char *c = p["color"];
+      if (c && strlen(c) > 0) ws2812_color = String(c);
+    }
+    if (p.containsKey("b")) {
+      ws2812_brightness = p["b"];
+    }
+    if (p.containsKey("mode")) {
+      const char *m = p["mode"];
+      if (m && strlen(m) > 0) {
+        ws2812_mode = String(m);
+        last_ws2812_anim_ms = 0;
+        lastWs2812LocalChange = millis();
+      }
+    } else if (p.containsKey("rgbMode")) {
+      const char *m = p["rgbMode"];
+      if (m && strlen(m) > 0) {
+        ws2812_mode = String(m);
+        last_ws2812_anim_ms = 0;
+        lastWs2812LocalChange = millis();
+      }
+    }
+    applyDeviceControl("rgb", st == 1);
+    return;
+  }
+
+  applyDeviceControl(String(dev), st == 1);
+}
+
+void webSocketEvent(WStype_t type, uint8_t *payload, size_t length) {
+  switch (type) {
+    case WStype_DISCONNECTED:
+      wsConnected = false;
+      Serial.println(F("[REALTIME WS] Disconnected from Supabase Realtime"));
+      break;
+
+    case WStype_CONNECTED: {
+      wsConnected = true;
+      Serial.println(F("[REALTIME WS] Connected to Supabase Realtime!"));
+      // Join Phoenix broadcast channel "device_control"
+      const char *joinMsg = "{\"topic\":\"realtime:device_control\",\"event\":\"phx_join\",\"payload\":{\"config\":{\"broadcast\":{\"ack\":false,\"self\":false}}},\"ref\":\"1\"}";
+      wsClient.sendTXT(joinMsg);
+      Serial.println(F("[REALTIME WS] Sent phx_join for realtime:device_control"));
+      lastWsHeartbeat = millis();
+      break;
+    }
+
+    case WStype_TEXT: {
+      if (length > 0 && payload != NULL) {
+        handleRealtimeWsMessage((const char *)payload, length);
+      }
+      break;
+    }
+
+    case WStype_ERROR:
+      Serial.println(F("[REALTIME WS] WebSocket error event"));
+      break;
+
+    default:
+      break;
+  }
+}
+
+void initSupabaseRealtimeWS() {
+  String host = String(SUPABASE_URL);
+  if (host.startsWith("https://")) host = host.substring(8);
+  else if (host.startsWith("http://")) host = host.substring(7);
+  int slashIdx = host.indexOf('/');
+  if (slashIdx >= 0) host = host.substring(0, slashIdx);
+
+  String path = "/realtime/v1/websocket?apikey=" + String(SUPABASE_KEY) + "&vsn=1.0.0";
+
+  wsClient.beginSSL(host.c_str(), 443, path.c_str());
+  wsClient.onEvent(webSocketEvent);
+  wsClient.setReconnectInterval(4000);
+  wsClient.enableHeartbeat(15000, 3000, 2);
+  Serial.printf("[REALTIME WS] Initialized WebSocket client to wss://%s:443\n", host.c_str());
 }
 
 // ==========================================
@@ -3326,6 +3621,48 @@ void setup() {
 unsigned long lastSupabasePoll = 0;
 unsigned long lastSupabaseTelemetry = 0;
 bool supabaseSyncActive = false;
+
+// --- HTTP Date Header Clock Synchronization ---
+// Extracts UTC timestamp from RFC 1123 HTTP Date header ("Date: Fri, 02 Oct 2026 17:19:39 GMT")
+// Guarantees atomic hardware RTC synchronization across mobile data and firewalled school networks even if NTP UDP is blocked!
+void syncTimeFromHttpDateHeader(const String &dateStr) {
+  if (dateStr.length() < 25) return;
+  int commaIdx = dateStr.indexOf(',');
+  if (commaIdx < 0) return;
+  String rest = dateStr.substring(commaIdx + 1);
+  rest.trim(); // "02 Oct 2026 17:19:39 GMT"
+
+  int d = rest.substring(0, 2).toInt();
+  String mStr = rest.substring(3, 6);
+  int y = rest.substring(7, 11).toInt();
+  int h = rest.substring(12, 14).toInt();
+  int mi = rest.substring(15, 17).toInt();
+  int s = rest.substring(18, 20).toInt();
+
+  const char *months[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+  int m = -1;
+  for (int i = 0; i < 12; i++) {
+    if (mStr.equalsIgnoreCase(months[i])) { m = i; break; }
+  }
+  if (m < 0 || y < 2024 || d < 1 || d > 31) return;
+
+  static const int daysBeforeMonth[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+  int leaps = (y - 1969) / 4 - (y - 1901) / 100 + (y - 1601) / 400;
+  bool isLeap = ((y % 4 == 0) && (y % 100 != 0)) || (y % 400 == 0);
+  int days = (y - 1970) * 365 + leaps + daysBeforeMonth[m] + (d - 1);
+  if (isLeap && m > 1) days++;
+  time_t epoch = (time_t)days * 86400L + (time_t)h * 3600L + (time_t)mi * 60L + s;
+
+  if (epoch > 1700000000) {
+    time_t cur = time(nullptr);
+    if (abs((long)(cur - epoch)) > 3) {
+      struct timeval tv = { .tv_sec = epoch, .tv_usec = 0 };
+      settimeofday(&tv, NULL);
+      Serial.printf("[TIME] Synced RTC clock from HTTP Date header: %ld (%04d-%02d-%02d %02d:%02d:%02d UTC)\n",
+                    (long)epoch, y, m + 1, d, h, mi, s);
+    }
+  }
+}
 
 void syncWithSupabase() {
   if (WiFi.status() != WL_CONNECTED)
@@ -3448,6 +3785,8 @@ void syncWithSupabase() {
 
     HTTPClient https;
     https.setTimeout(2500);
+    const char *headerKeys[] = {"Date"};
+    https.collectHeaders(headerKeys, 1);
     String url = String(SUPABASE_URL) + "/rest/v1/devices?select=id,status,settings";
     if (https.begin(client, url)) {
       https.addHeader("apikey", SUPABASE_KEY);
@@ -3456,11 +3795,13 @@ void syncWithSupabase() {
 
       int httpCode = https.GET();
       if (httpCode == 200) {
+        if (https.hasHeader("Date")) {
+          syncTimeFromHttpDateHeader(https.header("Date"));
+        }
         supabaseSyncActive = true;
         String payload = https.getString();
 
-        static StaticJsonDocument<6144> doc;
-        doc.clear();
+        DynamicJsonDocument doc(12288);
         DeserializationError err = deserializeJson(doc, payload);
         if (err) {
           Serial.printf("[SUPABASE] JSON Deserialization error: %s (payload bytes: %d)\n", err.c_str(), payload.length());
@@ -3505,9 +3846,6 @@ void syncWithSupabase() {
                   } else if (bt.containsKey("timestamp") && !bt["timestamp"].isNull()) {
                     ts = bt["timestamp"].as<String>();
                   }
-                  static String lastExecutedBellTs = "";
-                  static bool bellBootLatch = false;
-
                   if (ts.length() > 0 && ts != "null" && ts != "0") {
                     if (!bellBootLatch) {
                       // First poll after boot: latch existing timestamp so we don't ring old/stale triggers!
@@ -3516,8 +3854,8 @@ void syncWithSupabase() {
                       Serial.printf("[CLOUD BELL] Startup trigger latched: %s\n", ts.c_str());
                     } else if (ts != lastExecutedBellTs) {
                       lastExecutedBellTs = ts;
-                      if (now - lastLocalBellTriggerMs < 8000) {
-                        Serial.printf("[CLOUD BELL] Echo suppressed: local LAN bell already played %lu ms ago\n", now - lastLocalBellTriggerMs);
+                      if ((now - lastLocalBellTriggerMs < 12000) || (chimeNoteIndex >= 0)) {
+                        Serial.printf("[CLOUD BELL] Echo suppressed: bell already played/playing (%lu ms ago)\n", now - lastLocalBellTriggerMs);
                       } else {
                         const char* pat = bt["pattern"] | "japanese-school-bell";
                         Serial.printf("[CLOUD BELL] Triggered via Supabase! Pattern: %s, ts: %s\n", pat, ts.c_str());
@@ -3611,6 +3949,7 @@ void syncWithSupabase() {
                     ws2812_brightness = map(constrain(b, 0, 100), 0, 100, 0, 255);
                   }
                   if (s.containsKey("rgbMode")) ws2812_mode = s["rgbMode"].as<String>();
+                  else if (s.containsKey("mode")) ws2812_mode = s["mode"].as<String>();
                 }
                 updateWs2812Strip();
               }
@@ -3770,22 +4109,31 @@ void syncWithSupabase() {
                     colorChanged = true;
                   }
                 }
-                if (s.containsKey("rgbMode")) {
-                  String newMode = s["rgbMode"].as<String>();
-                  if (newMode.length() > 0 && newMode != ws2812_mode) {
+                String newMode = "";
+                if (s.containsKey("rgbMode")) newMode = s["rgbMode"].as<String>();
+                else if (s.containsKey("mode")) newMode = s["mode"].as<String>();
+
+                if (newMode.length() > 0 && newMode != ws2812_mode) {
+                  if (millis() - lastWs2812LocalChange < 8000) {
+                    Serial.printf("[WS2812] Cloud poll echo suppressed: recent command set mode '%s' %lu ms ago (cloud had '%s')\n",
+                                  ws2812_mode.c_str(), millis() - lastWs2812LocalChange, newMode.c_str());
+                  } else {
                     ws2812_mode = newMode;
+                    last_ws2812_anim_ms = 0;
                     colorChanged = true;
                   }
                 }
               }
-              if (stateChanged || colorChanged) {
-                // If color/mode was changed, turn the strip on if not explicitly off
-                bool effectiveState = colorChanged ? true : isOn;
-                cloud_prev_ws2812 = effectiveState;
-                state_ws2812 = effectiveState;
+              if (stateChanged || (colorChanged && isOn)) {
+                cloud_prev_ws2812 = isOn;
+                state_ws2812 = isOn;
                 updateWs2812Strip();
                 Serial.printf("[CLOUD COMMAND] Corridor RGB Strip -> %s (Color: %s, Mode: %s, B: %d)\n",
-                              effectiveState ? "ON" : "OFF", ws2812_color.c_str(), ws2812_mode.c_str(), ws2812_brightness);
+                              isOn ? "ON" : "OFF", ws2812_color.c_str(), ws2812_mode.c_str(), ws2812_brightness);
+              } else if (colorChanged && !isOn) {
+                // Settings updated while strip is OFF: save color/mode/brightness silently without turning strip ON!
+                cloud_prev_ws2812 = false;
+                state_ws2812 = false;
               }
             }
           }
@@ -3906,8 +4254,10 @@ void syncWithSupabase() {
       }
     } else {
       // Slot 4: Cloud Digital Notice Board Announcements
-      // Reads dedicated active announcements from Supabase
-      String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?is_active=eq.true&order=created_at.desc&limit=8";
+      // Reads dedicated active announcements from Supabase with lean projection
+      String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?select=id,classroom_id,title,message,duration&is_active=eq.true&order=created_at.desc&limit=6";
+      const char *annHeaderKeys[] = {"Date"};
+      https.collectHeaders(annHeaderKeys, 1);
       if (https.begin(client, urlAnn)) {
         https.addHeader("apikey", SUPABASE_KEY);
         https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
@@ -3915,8 +4265,11 @@ void syncWithSupabase() {
 
         int code = https.GET();
         if (code == 200) {
+          if (https.hasHeader("Date")) {
+            syncTimeFromHttpDateHeader(https.header("Date"));
+          }
           String payload = https.getString();
-          StaticJsonDocument<2048> doc;
+          DynamicJsonDocument doc(4096);
           DeserializationError err = deserializeJson(doc, payload);
           if (!err && doc.is<JsonArray>()) {
             reconcileNoticesFromCloud(doc.as<JsonArray>());
@@ -4094,8 +4447,21 @@ void loop() {
     dnsServer.processNextRequest();
   }
 
-  // 1b. Process incoming HTTP client requests
+  // 1b. Process incoming HTTP client requests & Realtime WebSocket frames
   server.handleClient();
+  if (WiFi.status() == WL_CONNECTED) {
+    wsClient.loop();
+
+    // Phoenix channel heartbeat every 20 seconds
+    if (wsConnected) {
+      unsigned long nowMs = millis();
+      if (nowMs - lastWsHeartbeat >= 20000) {
+        lastWsHeartbeat = nowMs;
+        const char *hb = "{\"topic\":\"phoenix\",\"event\":\"heartbeat\",\"payload\":{},\"ref\":\"hb\"}";
+        wsClient.sendTXT(hb);
+      }
+    }
+  }
 
   // 1c. Non-blocking Audio Alert Buzzer & Timetable Period Bell
   handleBuzzer();

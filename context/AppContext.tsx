@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Vibration } from 'react-native';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -103,6 +103,12 @@ function deviceSettings(dev: Device): Record<string, unknown> {
   const record = dev as unknown as Record<string, unknown>;
   for (const k of SETTING_KEYS) {
     if (record[k] !== undefined) s[k] = record[k];
+  }
+  // Guarantee rgbMode and mode are always in complete lockstep for RGB strips
+  if (dev.id === 'dev-corr-rgb-strip' || dev.id.includes('rgb') || dev.id.includes('strip')) {
+    const effectiveMode = (dev.rgbMode || dev.mode || 'solid') as string;
+    s.rgbMode = effectiveMode;
+    s.mode = effectiveMode;
   }
   return s;
 }
@@ -219,6 +225,9 @@ function mapDevice(row: DeviceRow): Device {
   const rated = typeof settings.ratedPower === 'number'
     ? settings.ratedPower
     : (row.power_usage > 0 ? row.power_usage : defaultRated);
+  const rgbMode = (typeof settings.rgbMode === 'string' && settings.rgbMode)
+    ? settings.rgbMode
+    : ((typeof settings.mode === 'string' && settings.mode) ? settings.mode : undefined);
   return {
     id: row.id, name: row.name, category: row.category as DeviceCategory,
     status: row.status as DeviceStatus, controllerId: row.controller_id,
@@ -228,6 +237,7 @@ function mapDevice(row: DeviceRow): Device {
     ratedPower: rated,
     energyToday: row.energy_today, lastUpdated: row.last_updated,
     ...settings,
+    ...(rgbMode ? { rgbMode, mode: rgbMode } : {}),
   };
 }
 
@@ -341,9 +351,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [timetable, setTimetable] = useState<TimetableConfig>(defaultTimetable);
   const [themeMode, setThemeModeState] = useState<ThemeMode>('dark');
   const [energyData, setEnergyData] = useState(mockEnergyData);
-  const [quickControls, setQuickControls] = useState<QuickControls>({
-    allLights: false, allFans: false, allCurtains: false,
-  });
+  const quickControls = useMemo<QuickControls>(() => {
+    const allDevices = classrooms.flatMap(c => c.devices).filter(d => d.status !== 'offline');
+    const lights = allDevices.filter(d => d.category === 'light');
+    const fans = allDevices.filter(d => d.category === 'fan');
+    const curtains = allDevices.filter(d => d.category === 'curtain');
+
+    return {
+      allLights: lights.length > 0 && lights.some(d => d.status === 'on'),
+      allFans: fans.length > 0 && fans.some(d => d.status === 'on'),
+      allCurtains: curtains.length > 0 && curtains.some(d => d.status === 'on'),
+    };
+  }, [classrooms]);
   const [isReady, setIsReady] = useState(false);
 
   // ESP32 Integration State
@@ -363,6 +382,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const noticesRef = useRef<NoticeItem[]>([]);
   const rgbFetchAbortRef = useRef<AbortController | null>(null);
   const debouncedSyncTimeoutRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const realtimeControlChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const lastRgbChangeRef = useRef<number>(0);
+  const pendingRgbModeRef = useRef<string | undefined>(undefined);
+  const pendingRgbColorRef = useRef<string | undefined>(undefined);
+  const pendingRgbBrightnessRef = useRef<number | undefined>(undefined);
+  const lastBellTestTimeRef = useRef<number>(0);
+
+  const broadcastDeviceCommand = useCallback((devCode: string, state: boolean, extra?: Record<string, unknown>) => {
+    if (!realtimeControlChannelRef.current) return;
+    try {
+      void realtimeControlChannelRef.current.send({
+        type: 'broadcast',
+        event: 'cmd',
+        payload: {
+          dev: devCode,
+          st: state ? 1 : 0,
+          t: Date.now(),
+          ...extra,
+        },
+      });
+    } catch (e) {
+      console.warn('[REALTIME] Broadcast error:', e);
+    }
+  }, []);
 
   const setThemeMode = useCallback((mode: ThemeMode) => {
     setThemeModeState(mode);
@@ -492,7 +535,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // Decouple notifications: Never include notice board announcements in the notifications feed
     const rawNotifs = (notifRes.data as NotificationRow[]) || [];
     setNotifications(rawNotifs.filter(r => !r.type?.startsWith('notice')).map(mapNotification));
-    setQuickControls({ allLights: false, allFans: false, allCurtains: false });
 
     try {
       // 1. Primary: Load Campus Notice Board items from dedicated 'announcements' table
@@ -604,7 +646,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const storedClassrooms = await AsyncStorage.getItem(STORAGE_KEYS.CLASSROOMS);
           const storedAlerts = await AsyncStorage.getItem(STORAGE_KEYS.ALERTS);
           const storedNotifications = await AsyncStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
-          const storedQuickControls = await AsyncStorage.getItem(STORAGE_KEYS.QUICK_CONTROLS);
           const storedEsp32Ip = await AsyncStorage.getItem(STORAGE_KEYS.ESP32_IP);
           const storedSystemMode = await AsyncStorage.getItem(STORAGE_KEYS.SYSTEM_MODE);
           const storedNotices = await AsyncStorage.getItem(STORAGE_KEYS.NOTICES);
@@ -642,7 +683,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
           if (storedAlerts) setAlerts(JSON.parse(storedAlerts));
           if (storedNotifications) setNotifications(JSON.parse(storedNotifications));
-          if (storedQuickControls) setQuickControls(JSON.parse(storedQuickControls));
           if (storedEsp32Ip) setEsp32IpState(storedEsp32Ip);
           if (storedSystemMode === 'auto' || storedSystemMode === 'manual') setSystemModeState(storedSystemMode);
         } catch (error) {
@@ -669,11 +709,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!isReady) return;
     AsyncStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications)).catch(console.error);
   }, [notifications, isReady]);
-
-  useEffect(() => {
-    if (!isReady) return;
-    AsyncStorage.setItem(STORAGE_KEYS.QUICK_CONTROLS, JSON.stringify(quickControls)).catch(console.error);
-  }, [quickControls, isReady]);
 
   useEffect(() => {
     if (!isReady) return;
@@ -736,9 +771,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   ? newSettings.ratedPower
                   : (dev.ratedPower || (newRecord.power_usage > 0 ? newRecord.power_usage : (dev.category === 'fan' ? 75 : dev.category === 'light' ? 60 : 40)));
                 const isOn = newRecord.status === 'on';
+
+                // Shield recent RGB changes from stale Supabase echo
+                const isRecentRgb = (dev.id === 'dev-corr-rgb-strip' || dev.id.includes('rgb')) && Date.now() - lastRgbChangeRef.current < 5000;
+                const shieldSettings = isRecentRgb ? {
+                  ...newSettings,
+                  ...(pendingRgbModeRef.current ? { rgbMode: pendingRgbModeRef.current, mode: pendingRgbModeRef.current } : {}),
+                  ...(pendingRgbColorRef.current ? { color: pendingRgbColorRef.current } : {}),
+                  ...(pendingRgbBrightnessRef.current !== undefined ? { brightness: pendingRgbBrightnessRef.current } : {}),
+                } : newSettings;
+
                 return {
                   ...dev,
-                  ...newSettings,
+                  ...shieldSettings,
                   status: newRecord.status as DeviceStatus,
                   ratedPower: rated,
                   powerUsage: isOn ? rated : 0,
@@ -864,8 +909,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
       )
       .subscribe();
 
+    // Subscribe to low-latency device control broadcast channel (Phoenix channels)
+    const controlChannel = supabase.channel('device_control', {
+      config: { broadcast: { ack: false, self: false } },
+    });
+    controlChannel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        // Send initial clock synchronization to ESP32 hardware RTC
+        void controlChannel.send({
+          type: 'broadcast',
+          event: 'cmd',
+          payload: {
+            dev: 'time',
+            st: 1,
+            epoch: Math.floor(Date.now() / 1000),
+            t: Date.now(),
+          },
+        });
+      }
+    });
+    realtimeControlChannelRef.current = controlChannel;
+
+    // Periodic time sync every 60s keeps ESP32 hardware RTC accurate even across mobile data
+    const timeSyncInterval = setInterval(() => {
+      if (realtimeControlChannelRef.current) {
+        void realtimeControlChannelRef.current.send({
+          type: 'broadcast',
+          event: 'cmd',
+          payload: {
+            dev: 'time',
+            st: 1,
+            epoch: Math.floor(Date.now() / 1000),
+            t: Date.now(),
+          },
+        });
+      }
+    }, 60000);
+
     return () => {
+      clearInterval(timeSyncInterval);
       supabase.removeChannel(channel);
+      if (controlChannel) supabase.removeChannel(controlChannel);
+      realtimeControlChannelRef.current = null;
     };
   }, [isReady]);
 
@@ -880,11 +965,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const syncDevices = useCallback(async (updates: { id: string; data: Record<string, unknown> }[]) => {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured || updates.length === 0) return;
     const now = new Date().toISOString();
-    for (const u of updates) {
-      const { error } = await supabase.from('devices').update({ ...u.data, last_updated: now }).eq('id', u.id);
-      if (error) console.error('DEVICE SYNC FAILED', u.id, error.message);
+    try {
+      await Promise.all(
+        updates.map(u =>
+          supabase.from('devices').update({ ...u.data, last_updated: now }).eq('id', u.id)
+        )
+      );
+    } catch (err) {
+      console.error('DEVICE SYNC FAILED:', err);
     }
   }, []);
 
@@ -1139,12 +1229,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
             if (dev.id === 'dev-corr-rgb-strip' || dev.id.includes('rgb') || dev.id.includes('strip')) {
               const rgbHwOn = telemetry.corridors.rgb !== undefined ? telemetry.corridors.rgb.power : (dev.status === 'on');
               const res = resolveDeviceStatus(dev, rgbHwOn);
+              // Shield recent user RGB changes from stale incoming telemetry
+              const isRecentRgbChange = Date.now() - lastRgbChangeRef.current < 5000;
+              const effectiveColor = (isRecentRgbChange && pendingRgbColorRef.current) 
+                ? pendingRgbColorRef.current 
+                : (telemetry.corridors.rgb?.color || dev.color || '#FF6B00');
+              const effectiveBrightness = (isRecentRgbChange && pendingRgbBrightnessRef.current !== undefined)
+                ? pendingRgbBrightnessRef.current
+                : (telemetry.corridors.rgb?.brightness !== undefined ? telemetry.corridors.rgb.brightness : (dev.brightness ?? 80));
+              const effectiveRgbMode = (isRecentRgbChange && pendingRgbModeRef.current)
+                ? pendingRgbModeRef.current
+                : (telemetry.corridors.rgb?.mode || dev.rgbMode || 'solid');
+
               return {
                 ...dev,
                 ...res,
-                color: telemetry.corridors.rgb?.color || dev.color || '#FF6B00',
-                brightness: telemetry.corridors.rgb?.brightness !== undefined ? telemetry.corridors.rgb.brightness : (dev.brightness ?? 80),
-                rgbMode: telemetry.corridors.rgb?.mode || dev.rgbMode || 'solid',
+                color: effectiveColor,
+                brightness: effectiveBrightness,
+                rgbMode: effectiveRgbMode,
+                mode: effectiveRgbMode,
               };
             }
             const isDev1 = dev.id.includes('1');
@@ -1223,9 +1326,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   ? cloudSettings.ratedPower
                   : (dev.ratedPower || (cloudDev.power_usage > 0 ? cloudDev.power_usage : (dev.category === 'fan' ? 75 : dev.category === 'light' ? 60 : 40)));
                 const isOn = cloudDev.status === 'on';
+
+                // Shield recent RGB changes from stale cloud fallback fetch
+                const isRecentRgb = (dev.id === 'dev-corr-rgb-strip' || dev.id.includes('rgb')) && Date.now() - lastRgbChangeRef.current < 5000;
+                const shieldSettings = isRecentRgb ? {
+                  ...cloudSettings,
+                  ...(pendingRgbModeRef.current ? { rgbMode: pendingRgbModeRef.current, mode: pendingRgbModeRef.current } : {}),
+                  ...(pendingRgbColorRef.current ? { color: pendingRgbColorRef.current } : {}),
+                  ...(pendingRgbBrightnessRef.current !== undefined ? { brightness: pendingRgbBrightnessRef.current } : {}),
+                } : cloudSettings;
+
                 return {
                   ...dev,
-                  ...cloudSettings,
+                  ...shieldSettings,
                   status: cloudDev.status as DeviceStatus,
                   ratedPower: rated,
                   powerUsage: isOn ? rated : 0,
@@ -1315,8 +1428,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // 3. Instant Realtime WebSocket broadcast (<50ms over mobile data)
+    broadcastDeviceCommand('mode', mode === 'auto');
+
     showToast(`Switched to ${mode.toUpperCase()} Mode`, 'info');
-  }, [classrooms, esp32Ip, showToast]);
+  }, [broadcastDeviceCommand, classrooms, esp32Ip, showToast]);
 
   const toggleEsp32Mode = useCallback(async () => {
     const nextMode = systemMode === 'auto' ? 'manual' : 'auto';
@@ -1363,6 +1479,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     candidateIps.forEach(ip => {
       void sendEsp32Command(ip, devCode, nextState, 3500, extraParams);
     });
+
+    // Sub-50ms Realtime WebSocket Broadcast to ESP32 (instant over mobile data)
+    broadcastDeviceCommand(
+      devCode,
+      nextState,
+      devCode === 'rgb' ? {
+        color: targetDev.color || '#FF6B00',
+        b: targetDev.brightness ?? 80,
+        mode: targetDev.rgbMode || 'solid',
+      } : undefined
+    );
 
     // 2. Optimistic local React state update (Instant 0ms UI response)
     const autoOffStartedAt = newStatus === 'on' && targetDev.schedule?.autoOffEnabled ? new Date().toISOString() : null;
@@ -1424,22 +1551,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [classrooms, esp32Ip, setSystemMode, showToast, syncDevices, systemMode]);
 
   const updateDeviceValue = useCallback((classroomId: string, deviceId: string, updates: Partial<Device>) => {
-    let settings: Record<string, unknown> | null = null;
+    // 1. Synchronously resolve existing device and calculate new settings
+    const targetCls = classrooms.find(c => c.id === classroomId) || classrooms.find(c => c.devices.some(d => d.id === deviceId));
+    const targetDev = targetCls?.devices.find(d => d.id === deviceId);
+    const effectiveClassroomId = targetCls?.id || classroomId;
+
+    const mergedDev: Device | null = targetDev ? {
+      ...targetDev,
+      ...updates,
+      lastUpdated: new Date().toISOString(),
+    } : null;
+
+    const targetSettings = mergedDev ? deviceSettings(mergedDev) : null;
+
+    if (deviceId === 'dev-corr-rgb-strip' || deviceId.includes('rgb')) {
+      lastRgbChangeRef.current = Date.now();
+      if (updates.rgbMode) pendingRgbModeRef.current = updates.rgbMode;
+      if (updates.color) pendingRgbColorRef.current = updates.color;
+      if (updates.brightness !== undefined) pendingRgbBrightnessRef.current = updates.brightness;
+    }
+
+    // 2. Immediate optimistic state update in React
     setClassrooms(prev => prev.map(cls => {
-      if (cls.id !== classroomId) return cls;
+      if (cls.id !== effectiveClassroomId) return cls;
       return {
         ...cls,
         devices: cls.devices.map(dev => {
           if (dev.id !== deviceId) return dev;
-          const updated = { ...dev, ...updates, lastUpdated: new Date().toISOString() };
-          settings = deviceSettings(updated);
-          return updated;
+          return {
+            ...dev,
+            ...updates,
+            ...(updates.rgbMode ? { rgbMode: updates.rgbMode, mode: updates.rgbMode } : {}),
+            lastUpdated: new Date().toISOString(),
+          };
         }),
       };
     }));
 
-    // Cloud database persistence: immediate for discrete modes/power, debounced for rapid color/brightness drags
-    const targetSettings = settings;
+    // 3. Cloud database persistence: immediate for discrete modes/power, debounced for rapid color/brightness drags
     if (targetSettings) {
       const isDiscrete = updates.rgbMode !== undefined || updates.status !== undefined;
       const syncData: Record<string, unknown> = { settings: targetSettings };
@@ -1464,7 +1613,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Instant LAN dispatch for WS2812B RGB Strip with active in-flight request abortion
+    // 4. Instant LAN dispatch for WS2812B RGB Strip with active in-flight request abortion
     if (deviceId === 'dev-corr-rgb-strip' || deviceId.includes('rgb')) {
       if (rgbFetchAbortRef.current) {
         rgbFetchAbortRef.current.abort();
@@ -1487,12 +1636,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (updates.status !== undefined) url += `&st=${updates.status === 'on' ? '1' : '0'}`;
         if (updates.color) url += `&color=${encodeURIComponent(updates.color)}`;
         if (updates.brightness !== undefined) url += `&b=${updates.brightness}`;
-        if (updates.rgbMode) url += `&mode=${encodeURIComponent(updates.rgbMode)}`;
+        const activeMode = updates.rgbMode || targetDev?.rgbMode;
+        if (activeMode) url += `&mode=${encodeURIComponent(activeMode)}`;
 
         fetch(url, { signal: controller.signal }).catch(() => {});
       });
     }
-  }, [classrooms, esp32Ip, syncDevices]);
+
+    // 5. Sub-50ms Realtime WebSocket Broadcast to ESP32
+    const devCodeForBc = targetDev ? mapDeviceToEsp32Code(effectiveClassroomId, targetDev) : (deviceId.includes('rgb') ? 'rgb' : '');
+    if (devCodeForBc) {
+      broadcastDeviceCommand(
+        devCodeForBc,
+        updates.status ? updates.status === 'on' : (targetDev?.status === 'on'),
+        devCodeForBc === 'rgb' ? {
+          color: updates.color ?? targetDev?.color,
+          b: updates.brightness ?? targetDev?.brightness,
+          mode: updates.rgbMode ?? targetDev?.rgbMode ?? 'solid',
+        } : undefined
+      );
+    }
+  }, [broadcastDeviceCommand, classrooms, esp32Ip, syncDevices]);
 
   const updateDeviceRatedPower = useCallback(async (classroomId: string, deviceId: string, ratedWatts: number) => {
     let updatedLoad = 0;
@@ -1569,20 +1733,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [esp32Ip, showToast]);
 
   const updateDeviceSchedule = useCallback((classroomId: string, deviceId: string, schedule: DeviceSchedule) => {
-    let targetSettings: Record<string, unknown> | null = null;
+    const targetCls = classrooms.find(c => c.id === classroomId) || classrooms.find(c => c.devices.some(d => d.id === deviceId));
+    const targetDev = targetCls?.devices.find(d => d.id === deviceId);
+    const targetSettings = targetDev ? { ...deviceSettings(targetDev), schedule } : null;
+
     setClassrooms(prev => prev.map(cls => {
       if (cls.id !== classroomId) return cls;
       return {
         ...cls,
         devices: cls.devices.map(dev => {
           if (dev.id !== deviceId) return dev;
-          const updated: Device = {
+          return {
             ...dev,
             schedule,
             lastUpdated: new Date().toISOString(),
           };
-          targetSettings = deviceSettings(updated);
-          return updated;
         }),
       };
     }));
@@ -1609,8 +1774,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       fetch(`${baseUrl}/api/time?epoch=${currentEpoch}`).catch(() => {});
     }
 
+    // 3. Instant Realtime WebSocket broadcast (<50ms over mobile data / cellular)
+    broadcastDeviceCommand('sched', schedule.enabled, { id: deviceId, schedule });
+
     showToast(schedule.enabled ? 'Schedule saved and activated' : 'Schedule disabled', 'success');
-  }, [esp32Ip, showToast, syncDevices]);
+  }, [broadcastDeviceCommand, esp32Ip, showToast, syncDevices]);
 
   // ─── Automated Device Schedule & Countdown Timer Engine ─────────────
   const lastScheduleTriggerRef = useRef<Record<string, { on?: string; off?: string }>>({});
@@ -1703,6 +1871,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
               // Dispatch to hardware & Supabase
               void (async () => {
                 const espDev = mapDeviceToEsp32Code(cls.id, dev);
+                // Sub-50ms Realtime WebSocket broadcast for mobile data & remote cellular actuation
+                broadcastDeviceCommand(espDev, newStatus === 'on');
+
                 if (esp32Ip && esp32Ip.trim()) {
                   try {
                     const ac = new AbortController();
@@ -1752,72 +1923,93 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [esp32Ip, showToast, syncDevices]);
 
   const toggleQuickControl = useCallback((control: keyof QuickControls) => {
-    setQuickControls(prev => {
-      const newState = !prev[control];
-      const category = categoryMap[control];
-      const sync: { id: string; data: Record<string, unknown> }[] = [];
-      setClassrooms(prevCls => prevCls.map(cls => {
-        const updatedDevices = cls.devices.map(dev => {
-          if (dev.category !== category || dev.status === 'offline') return dev;
-          const newStatus: DeviceStatus = newState ? 'on' : 'off';
-          const rated = dev.ratedPower || (dev.category === 'fan' ? 75 : dev.category === 'light' ? 60 : 40);
-          const powerUsage = newStatus === 'off' ? 0 : rated;
-          const existingSettings = deviceSettings(dev);
-          existingSettings.ratedPower = rated;
-          sync.push({ id: dev.id, data: { status: newStatus, power_usage: powerUsage, settings: existingSettings } });
-          lastUserToggleRef.current[dev.id] = Date.now();
-          pendingUserToggleStateRef.current[dev.id] = newStatus;
-          return { ...dev, status: newStatus, ratedPower: rated, powerUsage, lastUpdated: new Date().toISOString() };
-        });
+    const category = categoryMap[control];
+    const targetDevices = classrooms
+      .flatMap(c => c.devices)
+      .filter(d => d.category === category && d.status !== 'offline');
+    const isAnyOn = targetDevices.some(d => d.status === 'on');
+    // If any are ON, master switch turns all OFF. If none are ON, turns all ON.
+    const newState = !isAnyOn;
+    const newStatus: DeviceStatus = newState ? 'on' : 'off';
+    const nowMs = Date.now();
 
-        const hasPhysicalSensor = cls.hasPowerMeter && cls.voltage && cls.voltage >= 60 && cls.current && cls.current >= 0.09;
-        const newLoad = hasPhysicalSensor 
-          ? cls.currentLoad 
-          : updatedDevices.reduce((sum, d) => sum + (d.status === 'on' ? (d.powerUsage || 0) : 0), 0);
-
-        return {
-          ...cls,
-          currentLoad: newLoad,
-          devices: updatedDevices,
-        };
-      }));
-      if (sync.length) void syncDevices(sync);
-
-      // Fast LAN dispatch to all candidate controller IPs
-      const candidateIps = new Set<string>();
-      if (esp32Ip && esp32Ip.trim()) candidateIps.add(esp32Ip.trim());
-      for (const c of classrooms) {
-        if (c.controller?.ipAddress && c.controller.ipAddress.trim()) {
-          candidateIps.add(c.controller.ipAddress.trim());
-        }
-      }
-
-      candidateIps.forEach(async ip => {
-        if (control === 'allLights') {
-          await sendEsp32Command(ip, 'l1', newState);
-          await sendEsp32Command(ip, 'l2', newState);
-          await sendEsp32Command(ip, 'cr1', newState);
-          await sendEsp32Command(ip, 'cr2', newState);
-        } else if (control === 'allFans') {
-          await sendEsp32Command(ip, 'f1', newState);
-          await sendEsp32Command(ip, 'f2', newState);
-        } else if (control === 'allCurtains') {
-          await sendEsp32Command(ip, 'c1', newState);
-          await sendEsp32Command(ip, 'c2', newState);
-        }
+    const sync: { id: string; data: Record<string, unknown> }[] = [];
+    setClassrooms(prevCls => prevCls.map(cls => {
+      const updatedDevices = cls.devices.map(dev => {
+        if (dev.category !== category || dev.status === 'offline') return dev;
+        const rated = dev.ratedPower || (dev.category === 'fan' ? 75 : dev.category === 'light' ? 60 : 40);
+        const powerUsage = newStatus === 'off' ? 0 : rated;
+        const existingSettings = deviceSettings(dev);
+        existingSettings.ratedPower = rated;
+        sync.push({ id: dev.id, data: { status: newStatus, power_usage: powerUsage, settings: existingSettings } });
+        lastUserToggleRef.current[dev.id] = nowMs;
+        pendingUserToggleStateRef.current[dev.id] = newStatus;
+        return { ...dev, status: newStatus, ratedPower: rated, powerUsage, lastUpdated: new Date().toISOString() };
       });
 
-      if (systemMode === 'auto') {
-        void setSystemMode('manual');
-        showToast('Manual Override: Switched to MANUAL Mode', 'info');
-      }
+      const hasPhysicalSensor = cls.hasPowerMeter && cls.voltage && cls.voltage >= 60 && cls.current && cls.current >= 0.09;
+      const newLoad = hasPhysicalSensor 
+        ? cls.currentLoad 
+        : updatedDevices.reduce((sum, d) => sum + (d.status === 'on' ? (d.powerUsage || 0) : 0), 0);
 
-      return { ...prev, [control]: newState };
+      return {
+        ...cls,
+        currentLoad: newLoad,
+        devices: updatedDevices,
+      };
+    }));
+
+    if (sync.length) void syncDevices(sync);
+
+    // Fast LAN dispatch to all candidate controller IPs
+    const candidateIps = new Set<string>();
+    if (esp32Ip && esp32Ip.trim()) candidateIps.add(esp32Ip.trim());
+    for (const c of classrooms) {
+      if (c.controller?.ipAddress && c.controller.ipAddress.trim()) {
+        candidateIps.add(c.controller.ipAddress.trim());
+      }
+    }
+
+    candidateIps.forEach(ip => {
+      if (control === 'allLights') {
+        void sendEsp32Command(ip, 'l1', newState);
+        void sendEsp32Command(ip, 'l2', newState);
+        void sendEsp32Command(ip, 'cr1', newState);
+        void sendEsp32Command(ip, 'cr2', newState);
+        void sendEsp32Command(ip, 'rgb', newState);
+      } else if (control === 'allFans') {
+        void sendEsp32Command(ip, 'f1', newState);
+        void sendEsp32Command(ip, 'f2', newState);
+      } else if (control === 'allCurtains') {
+        void sendEsp32Command(ip, 'c1', newState);
+        void sendEsp32Command(ip, 'c2', newState);
+      }
     });
-  }, [classrooms, esp32Ip, setSystemMode, showToast, syncDevices, systemMode]);
+
+    // Sub-50ms Realtime WebSocket broadcast for group controls
+    if (control === 'allLights') {
+      broadcastDeviceCommand('l1', newState);
+      broadcastDeviceCommand('l2', newState);
+      broadcastDeviceCommand('cr1', newState);
+      broadcastDeviceCommand('cr2', newState);
+      broadcastDeviceCommand('rgb', newState);
+    } else if (control === 'allFans') {
+      broadcastDeviceCommand('f1', newState);
+      broadcastDeviceCommand('f2', newState);
+    } else if (control === 'allCurtains') {
+      broadcastDeviceCommand('c1', newState);
+      broadcastDeviceCommand('c2', newState);
+    }
+
+    if (systemMode === 'auto') {
+      void setSystemMode('manual');
+      showToast('Manual Override: Switched to MANUAL Mode', 'info');
+    }
+  }, [broadcastDeviceCommand, classrooms, esp32Ip, setSystemMode, showToast, syncDevices, systemMode]);
 
   const emergencyOff = useCallback(() => {
     const sync: { id: string; data: Record<string, unknown> }[] = [];
+    const nowMs = Date.now();
     setClassrooms(prev => prev.map(cls => ({
       ...cls,
       currentLoad: 0,
@@ -1826,7 +2018,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const existingSettings = deviceSettings(dev);
         existingSettings.ratedPower = dev.ratedPower;
         sync.push({ id: dev.id, data: { status: 'off' as const, power_usage: 0, settings: existingSettings } });
-        lastUserToggleRef.current[dev.id] = Date.now();
+        lastUserToggleRef.current[dev.id] = nowMs;
         pendingUserToggleStateRef.current[dev.id] = 'off';
         return {
           ...dev,
@@ -1836,7 +2028,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
       }),
     })));
-    setQuickControls({ allLights: false, allFans: false, allCurtains: false });
+
     if (sync.length) void syncDevices(sync);
 
     // Also update Supabase classrooms current_load to 0
@@ -1855,10 +2047,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       void sendEsp32Command(ip, 'all', false);
     });
 
+    broadcastDeviceCommand('all', false);
+
     if (systemMode === 'auto') {
       void setSystemMode('manual');
     }
-  }, [classrooms, esp32Ip, setSystemMode, syncDevices, systemMode]);
+    showToast('Emergency All-Off Triggered', 'info');
+  }, [broadcastDeviceCommand, classrooms, esp32Ip, setSystemMode, showToast, syncDevices, systemMode]);
 
   // Periodic Polling of ESP32 (every 3 seconds)
   useEffect(() => {
@@ -1975,6 +2170,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       'success'
     );
 
+    // 0. Sub-50ms Realtime WebSocket broadcast for instant display & buzzer chime over mobile data
+    broadcastDeviceCommand('notice', true, {
+      id: newNotice.id,
+      classroom_id: newNotice.classroomId || 'all',
+      title: newNotice.title,
+      message: newNotice.message,
+      duration: newNotice.duration || '24h',
+    });
+
     // 1. Direct LAN dispatch to ESP32 for immediate OLED update
     const targetIp = esp32Ip || classrooms.find(c => c.controller?.ipAddress)?.controller?.ipAddress;
     if (targetIp) {
@@ -2043,7 +2247,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(STORAGE_KEYS.NOTICES, JSON.stringify([newNotice, ...notices])).catch(() => {});
 
     return true;
-  }, [classrooms, esp32Ip, showToast]);
+  }, [broadcastDeviceCommand, classrooms, esp32Ip, showToast]);
 
   const deleteNotice = useCallback(async (id: string): Promise<boolean> => {
     let remainingNotices: NoticeItem[] = [];
@@ -2113,8 +2317,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }).catch(() => {});
     });
 
+    // 0. Sub-50ms Realtime WebSocket broadcast for instant notice deletion over mobile data
+    broadcastDeviceCommand('notice_del', false, { id });
+
     return true;
-  }, [classrooms, esp32Ip, showToast]);
+  }, [broadcastDeviceCommand, classrooms, esp32Ip, showToast]);
 
   const deleteNotification = useCallback((id: string) => {
     // Decoupled: Deleting an app notification NEVER touches or removes Campus Notice Board items!
@@ -2234,19 +2441,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }).then(() => clearTimeout(timer)).catch(() => clearTimeout(timer));
     });
 
+    // 3. Instant Realtime WebSocket broadcast (<50ms over mobile data / cellular)
+    broadcastDeviceCommand('tt', true, { timetable: newConfig });
+
     showToast('Class Timetable & Bell Schedule Saved', 'success');
-  }, [classrooms, esp32Ip, showToast]);
+  }, [broadcastDeviceCommand, classrooms, esp32Ip, showToast]);
 
   const triggerBellTest = useCallback(async (pattern: BellPattern = 'college-bell') => {
+    // 0. Debounce guard to prevent rapid double-clicks on UI buttons
+    const now = Date.now();
+    if (now - lastBellTestTimeRef.current < 2000) {
+      return { success: true, message: 'Bell test already in progress' };
+    }
+    lastBellTestTimeRef.current = now;
+
     // 1. Haptic vibration feedback on the phone
     try {
       Vibration.vibrate([0, 150, 100, 150]);
     } catch {}
 
-    // 2. Play local audio chime preview if available (e.g. web browser / dev preview)
-    const webAudioPlayed = playChimeWebAudio(pattern);
-
-    // 3. Concurrently attempt direct local LAN trigger if candidate IPs exist
+    // 2. Concurrently attempt direct local LAN trigger if candidate IPs exist
     const candidateIps = new Set<string>();
     if (esp32Ip && esp32Ip.trim()) candidateIps.add(esp32Ip.trim());
     for (const c of classrooms) {
@@ -2280,7 +2494,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return { success: true, message: 'Bell chimed via local network' };
     }
 
-    // 4. If LAN failed or phone is on Mobile Data / Remote Network, dispatch via Supabase Cloud!
+    // 3. If LAN failed or phone is on Mobile Data / Remote Network, dispatch via Supabase Cloud!
+    // Shared trigger timestamp ensures ESP32 WebSocket and DB-poll match and suppress duplicates
+    const triggerTs = String(now);
+    broadcastDeviceCommand('bell', true, { pattern, ts: triggerTs });
+
     if (isSupabaseConfigured) {
       try {
         const { data: modeRow } = await supabase
@@ -2296,8 +2514,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
               ...existingSettings,
               bell_trigger: {
                 pattern,
-                timestamp: Date.now(),
-                ts: String(Date.now()),
+                timestamp: now,
+                ts: triggerTs,
               },
             },
             last_updated: new Date().toISOString(),
@@ -2313,12 +2531,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // 4. Play local audio chime preview ONLY if ESP32 / Cloud is unreachable (offline fallback preview)
+    const webAudioPlayed = playChimeWebAudio(pattern);
     if (webAudioPlayed) {
       showToast(`Period Bell (${pattern}) Preview Played (ESP32 Offline)`, 'info');
       return { success: true, message: 'Audio preview played' };
     }
     return { success: false, message: 'Could not reach ESP32 or Cloud to test bell' };
-  }, [classrooms, esp32Ip, showToast]);
+  }, [broadcastDeviceCommand, classrooms, esp32Ip, showToast]);
 
   const loginUser = useCallback(async (identifier: string, pass: string): Promise<{ success: boolean; message: string; user?: User }> => {
     const cleanId = identifier.trim();
