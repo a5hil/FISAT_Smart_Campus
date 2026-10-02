@@ -6,10 +6,14 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
+  Switch,
+  Platform,
+  Modal,
   PanResponder,
   GestureResponderEvent,
   PanResponderGestureState,
 } from 'react-native';
+import DateTimePicker, { DateTimePickerAndroid, DateTimePickerChangeEvent } from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '../../constants/colors';
 import { Layout } from '../../constants/layout';
@@ -1060,7 +1064,7 @@ function getChromaDynamicStyles(colors: any, isDark: boolean) {
 
 export default function DeviceDetailScreen() {
   const { id, classroomId } = useLocalSearchParams<{ id: string; classroomId: string }>();
-  const { classrooms, toggleDevice, updateDeviceValue, esp32Connected, esp32Ip, updateDeviceRatedPower } = useApp();
+  const { classrooms, toggleDevice, updateDeviceValue, esp32Connected, esp32Ip, updateDeviceRatedPower, updateDeviceSchedule } = useApp();
   const { colors, isDark } = useTheme();
   const router = useRouter();
 
@@ -1110,6 +1114,154 @@ export default function DeviceDetailScreen() {
   useEffect(() => {
     setInputWatts(String(currentRated));
   }, [currentRated]);
+
+  // Schedule & Automation State
+  const initialSchedule = device.schedule;
+  const [scheduleEnabled, setScheduleEnabled] = useState(initialSchedule?.enabled ?? false);
+  const [onTime, setOnTime] = useState(initialSchedule?.onTime || '08:30');
+  const [offTime, setOffTime] = useState(initialSchedule?.offTime || '17:00');
+  const [selectedDays, setSelectedDays] = useState<number[]>(initialSchedule?.days || [1, 2, 3, 4, 5]);
+  const [autoOffEnabled, setAutoOffEnabled] = useState(initialSchedule?.autoOffEnabled ?? false);
+  const [autoOffMinutes, setAutoOffMinutes] = useState(initialSchedule?.autoOffMinutes || 60);
+
+  // Time Picker State
+  const [activePicker, setActivePicker] = useState<'on' | 'off' | null>(null);
+  const [tempPickerDate, setTempPickerDate] = useState<Date>(new Date());
+
+  // Prevent background polling from overwriting in-flight user edits
+  const prevDeviceIdRef = useRef(device.id);
+  useEffect(() => {
+    if (prevDeviceIdRef.current !== device.id) {
+      prevDeviceIdRef.current = device.id;
+      if (device.schedule) {
+        setScheduleEnabled(device.schedule.enabled);
+        if (device.schedule.onTime) setOnTime(device.schedule.onTime);
+        if (device.schedule.offTime) setOffTime(device.schedule.offTime);
+        if (device.schedule.days) setSelectedDays(device.schedule.days);
+        if (device.schedule.autoOffEnabled !== undefined) setAutoOffEnabled(device.schedule.autoOffEnabled);
+        if (device.schedule.autoOffMinutes !== undefined) setAutoOffMinutes(device.schedule.autoOffMinutes);
+      }
+    }
+  }, [device.id, device.schedule]);
+
+  const timeStringToDate = (timeStr: string): Date => {
+    const parts = (timeStr || '08:00').split(':');
+    const d = new Date();
+    d.setHours(parseInt(parts[0] || '8', 10), parseInt(parts[1] || '0', 10), 0, 0);
+    return d;
+  };
+
+  const dateToTimeString = (date: Date): string => {
+    const h = String(date.getHours()).padStart(2, '0');
+    const m = String(date.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  };
+
+  const handleTimeConfirmed = (target: 'on' | 'off', newTimeStr: string) => {
+    const nextOn = target === 'on' ? newTimeStr : onTime;
+    const nextOff = target === 'off' ? newTimeStr : offTime;
+    if (target === 'on') setOnTime(newTimeStr);
+    else setOffTime(newTimeStr);
+
+    updateDeviceSchedule(classroom.id, device.id, {
+      enabled: scheduleEnabled,
+      onTime: nextOn,
+      offTime: nextOff,
+      days: selectedDays.length > 0 ? selectedDays : [1, 2, 3, 4, 5],
+      autoOffEnabled,
+      autoOffMinutes,
+      autoOffStartedAt: device.schedule?.autoOffStartedAt ?? null,
+    });
+  };
+
+  const openTimePicker = (target: 'on' | 'off') => {
+    const initialDate = timeStringToDate(target === 'on' ? onTime : offTime);
+    setTempPickerDate(initialDate);
+
+    if (Platform.OS === 'android') {
+      try {
+        DateTimePickerAndroid.open({
+          value: initialDate,
+          mode: 'time',
+          is24Hour: false,
+          onValueChange: (_event: DateTimePickerChangeEvent, selectedDate?: Date) => {
+            if (selectedDate) {
+              const formatted = dateToTimeString(selectedDate);
+              handleTimeConfirmed(target, formatted);
+            }
+          },
+          onDismiss: () => {},
+        });
+        return;
+      } catch (e) {
+        console.warn('DateTimePickerAndroid open fallback', e);
+      }
+    }
+
+    setActivePicker(target);
+  };
+
+  const adjustTime = (timeStr: string, deltaHours: number, deltaMins: number): string => {
+    const parts = (timeStr || '08:00').split(':');
+    let h = parseInt(parts[0] || '8', 10);
+    let m = parseInt(parts[1] || '0', 10);
+    m += deltaMins;
+    if (m >= 60) {
+      h += Math.floor(m / 60);
+      m = m % 60;
+    } else if (m < 0) {
+      const borrow = Math.ceil(Math.abs(m) / 60);
+      h -= borrow;
+      m = (m + borrow * 60) % 60;
+    }
+    h = (h + deltaHours) % 24;
+    if (h < 0) h += 24;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  };
+
+  const formatTime12h = (timeStr: string): string => {
+    const parts = (timeStr || '08:00').split(':');
+    const h = parseInt(parts[0] || '0', 10);
+    const m = parseInt(parts[1] || '0', 10);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+  };
+
+  const toggleDay = (dayNum: number) => {
+    if (selectedDays.includes(dayNum)) {
+      if (selectedDays.length > 1) {
+        setSelectedDays(selectedDays.filter(d => d !== dayNum));
+      }
+    } else {
+      setSelectedDays([...selectedDays, dayNum].sort());
+    }
+  };
+
+  const handleSaveSchedule = (overrideEnabled?: boolean, overrideAutoOff?: boolean) => {
+    const nextEnabled = overrideEnabled !== undefined ? overrideEnabled : scheduleEnabled;
+    const nextAutoOff = overrideAutoOff !== undefined ? overrideAutoOff : autoOffEnabled;
+    updateDeviceSchedule(classroom.id, device.id, {
+      enabled: nextEnabled,
+      onTime,
+      offTime,
+      days: selectedDays.length > 0 ? selectedDays : [1, 2, 3, 4, 5],
+      autoOffEnabled: nextAutoOff,
+      autoOffMinutes,
+      autoOffStartedAt: device.schedule?.autoOffStartedAt ?? null,
+    });
+  };
+
+  const getAutoOffCountdownText = () => {
+    if (!autoOffEnabled) return null;
+    if (isOn && device.schedule?.autoOffStartedAt) {
+      const started = new Date(device.schedule.autoOffStartedAt).getTime();
+      const elapsedMins = (Date.now() - started) / (1000 * 60);
+      const remaining = Math.max(0, Math.ceil(autoOffMinutes - elapsedMins));
+      return `Shutoff in ~${remaining} min`;
+    }
+    return `Arms on next power ON (${autoOffMinutes}m)`;
+  };
 
   const handleColorChange = (hex: string) => {
     updateDeviceValue(classroom.id, device.id, { color: hex });
@@ -1437,6 +1589,245 @@ export default function DeviceDetailScreen() {
           )}
         </View>
 
+        {/* Power Schedule & Automation Card */}
+        <View style={styles.scheduleCard}>
+          {/* Header with Master Toggle */}
+          <View style={styles.scheduleHeader}>
+            <View style={styles.scheduleTitleRow}>
+              <View style={styles.scheduleIconBox}>
+                <Ionicons name="time" size={20} color={colors.primary} />
+              </View>
+              <View style={styles.scheduleTextContainer}>
+                <Text style={styles.scheduleCardTitle}>Power Schedule & Automation</Text>
+                <Text style={styles.scheduleCardSubtitle}>
+                  Scheduled power cycles & automated shutoff
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={scheduleEnabled}
+              onValueChange={(val) => {
+                setScheduleEnabled(val);
+                handleSaveSchedule(val, undefined);
+              }}
+              trackColor={{ false: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)', true: colors.primary }}
+              thumbColor={scheduleEnabled ? '#FFFFFF' : (isDark ? '#D1D5DB' : '#FFFFFF')}
+            />
+          </View>
+
+          {/* Quick Schedule Presets */}
+          <View style={styles.scheduleSection}>
+            <Text style={styles.scheduleSectionLabel}>Operating Hours Preset:</Text>
+            <View style={styles.schedulePresetsRow}>
+              {[
+                { label: 'School (8:30 - 16:30)', on: '08:30', off: '16:30' },
+                { label: 'Morning (07:00 - 13:00)', on: '07:00', off: '13:00' },
+                { label: 'Evening (16:00 - 21:00)', on: '16:00', off: '21:00' },
+                { label: 'Full Day (08:00 - 20:00)', on: '08:00', off: '20:00' },
+              ].map(preset => {
+                const isActive = onTime === preset.on && offTime === preset.off;
+                return (
+                  <TouchableOpacity
+                    key={preset.label}
+                    style={[styles.schedulePresetChip, isActive && styles.schedulePresetChipActive]}
+                    onPress={() => {
+                      setOnTime(preset.on);
+                      setOffTime(preset.off);
+                      updateDeviceSchedule(classroom.id, device.id, {
+                        enabled: scheduleEnabled,
+                        onTime: preset.on,
+                        offTime: preset.off,
+                        days: selectedDays.length > 0 ? selectedDays : [1, 2, 3, 4, 5],
+                        autoOffEnabled,
+                        autoOffMinutes,
+                        autoOffStartedAt: device.schedule?.autoOffStartedAt ?? null,
+                      });
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.schedulePresetChipText, isActive && styles.schedulePresetChipTextActive]}>
+                      {preset.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* Time Setters: ON and OFF */}
+          <View style={styles.timeSetterRow}>
+            {/* Turn ON Time Box */}
+            <TouchableOpacity 
+              style={styles.timePickerCard}
+              onPress={() => openTimePicker('on')}
+              activeOpacity={0.75}
+            >
+              <View style={styles.timeSetterBoxHeader}>
+                <Ionicons name="power" size={14} color={colors.success} />
+                <Text style={styles.timeSetterBoxTitle}>POWER ON AT</Text>
+              </View>
+              <Text style={styles.timeDisplayBig}>{formatTime12h(onTime)}</Text>
+              <Text style={styles.timeDisplaySub}>{onTime} (24-Hour)</Text>
+              
+              <View style={styles.pickTimeActionRow}>
+                <Ionicons name="time-outline" size={14} color={colors.primary} />
+                <Text style={styles.pickTimeActionText}>Pick Time</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Turn OFF Time Box */}
+            <TouchableOpacity 
+              style={styles.timePickerCard}
+              onPress={() => openTimePicker('off')}
+              activeOpacity={0.75}
+            >
+              <View style={styles.timeSetterBoxHeader}>
+                <Ionicons name="power" size={14} color={colors.critical} />
+                <Text style={styles.timeSetterBoxTitle}>POWER OFF AT</Text>
+              </View>
+              <Text style={styles.timeDisplayBig}>{formatTime12h(offTime)}</Text>
+              <Text style={styles.timeDisplaySub}>{offTime} (24-Hour)</Text>
+              
+              <View style={styles.pickTimeActionRow}>
+                <Ionicons name="time-outline" size={14} color={colors.primary} />
+                <Text style={styles.pickTimeActionText}>Pick Time</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          {/* Active Days Selector */}
+          <View style={styles.scheduleSection}>
+            <View style={styles.daysHeaderRow}>
+              <Text style={styles.scheduleSectionLabel}>Active Days:</Text>
+              <View style={styles.daysPresetRow}>
+                <TouchableOpacity
+                  onPress={() => setSelectedDays([1, 2, 3, 4, 5])}
+                  style={styles.dayFilterBtn}
+                >
+                  <Text style={styles.dayFilterBtnText}>Weekdays</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setSelectedDays([1, 2, 3, 4, 5, 6, 7])}
+                  style={styles.dayFilterBtn}
+                >
+                  <Text style={styles.dayFilterBtnText}>All</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setSelectedDays([6, 7])}
+                  style={styles.dayFilterBtn}
+                >
+                  <Text style={styles.dayFilterBtnText}>Weekends</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.daysChipsRow}>
+              {[
+                { day: 1, label: 'Mon' },
+                { day: 2, label: 'Tue' },
+                { day: 3, label: 'Wed' },
+                { day: 4, label: 'Thu' },
+                { day: 5, label: 'Fri' },
+                { day: 6, label: 'Sat' },
+                { day: 7, label: 'Sun' },
+              ].map(d => {
+                const isSelected = selectedDays.includes(d.day);
+                return (
+                  <TouchableOpacity
+                    key={d.day}
+                    style={[styles.dayChip, isSelected && styles.dayChipActive]}
+                    onPress={() => toggleDay(d.day)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.dayChipText, isSelected && styles.dayChipTextActive]}>
+                      {d.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* Auto-Off Countdown Timer Section */}
+          <View style={styles.autoOffDivider} />
+          
+          <View style={styles.autoOffHeaderRow}>
+            <View style={styles.autoOffTitleCol}>
+              <View style={styles.autoOffTitleRow}>
+                <Ionicons name="timer-outline" size={17} color={colors.primary} />
+                <Text style={styles.autoOffTitle}>Auto-Off Countdown Timer</Text>
+              </View>
+              <Text style={styles.autoOffSubtitle}>
+                Automatically shuts off appliance after continuous run
+              </Text>
+            </View>
+            <Switch
+              value={autoOffEnabled}
+              onValueChange={(val) => {
+                setAutoOffEnabled(val);
+                handleSaveSchedule(undefined, val);
+              }}
+              trackColor={{ false: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)', true: colors.primary }}
+              thumbColor={autoOffEnabled ? '#FFFFFF' : (isDark ? '#D1D5DB' : '#FFFFFF')}
+            />
+          </View>
+
+          {autoOffEnabled && (
+            <View style={styles.autoOffBody}>
+              <Text style={styles.scheduleSectionLabel}>Shutoff Duration:</Text>
+              <View style={styles.autoOffChipsRow}>
+                {[
+                  { label: '15m', minutes: 15 },
+                  { label: '30m', minutes: 30 },
+                  { label: '45m', minutes: 45 },
+                  { label: '1h', minutes: 60 },
+                  { label: '2h', minutes: 120 },
+                  { label: '3h', minutes: 180 },
+                ].map(item => {
+                  const isCurrent = autoOffMinutes === item.minutes;
+                  return (
+                    <TouchableOpacity
+                      key={item.minutes}
+                      style={[styles.autoOffChip, isCurrent && styles.autoOffChipActive]}
+                      onPress={() => setAutoOffMinutes(item.minutes)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.autoOffChipText, isCurrent && styles.autoOffChipTextActive]}>
+                        {item.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {Boolean(getAutoOffCountdownText()) && (
+                <View style={styles.autoOffLiveStatus}>
+                  <Ionicons 
+                    name={isOn ? "flash-outline" : "shield-checkmark-outline"} 
+                    size={14} 
+                    color={isOn ? colors.warning : colors.success} 
+                  />
+                  <Text style={[styles.autoOffLiveText, { color: isOn ? colors.warning : colors.success }]}>
+                    {getAutoOffCountdownText()}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Save Schedule Action Button */}
+          <TouchableOpacity
+            style={styles.saveScheduleBtn}
+            onPress={() => handleSaveSchedule()}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="checkmark-circle-outline" size={18} color={isDark ? '#000000' : '#FFFFFF'} />
+            <Text style={styles.saveScheduleBtnText}>
+              {scheduleEnabled || autoOffEnabled ? 'Save & Activate Automation' : 'Save Schedule Settings'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Appliance & Control Specs */}
         <View style={styles.infoCard}>
           <Text style={styles.infoTitle}>Appliance Details</Text>
@@ -1466,6 +1857,187 @@ export default function DeviceDetailScreen() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* iOS Modal Spinner Time Picker */}
+      {Platform.OS === 'ios' && (
+        <Modal
+          visible={activePicker !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setActivePicker(null)}
+        >
+          <TouchableOpacity 
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setActivePicker(null)}
+          >
+            <TouchableOpacity activeOpacity={1} style={styles.iosPickerContainer}>
+              <View style={styles.iosPickerHeader}>
+                <TouchableOpacity onPress={() => setActivePicker(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Text style={styles.iosPickerCancel}>Cancel</Text>
+                </TouchableOpacity>
+                <Text style={styles.iosPickerTitle}>
+                  {activePicker === 'on' ? 'Set Power ON Time' : 'Set Power OFF Time'}
+                </Text>
+                <TouchableOpacity 
+                  onPress={() => {
+                    if (activePicker) {
+                      const formatted = dateToTimeString(tempPickerDate);
+                      handleTimeConfirmed(activePicker, formatted);
+                    }
+                    setActivePicker(null);
+                  }}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Text style={styles.iosPickerDone}>Done</Text>
+                </TouchableOpacity>
+              </View>
+              <DateTimePicker
+                value={tempPickerDate}
+                mode="time"
+                is24Hour={false}
+                display="spinner"
+                textColor={colors.text}
+                onValueChange={(_event: DateTimePickerChangeEvent, date?: Date) => {
+                  if (date) setTempPickerDate(date);
+                }}
+                onDismiss={() => {
+                  setActivePicker(null);
+                }}
+              />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
+      {/* Web & Universal Fallback Interactive Time Picker Modal */}
+      {Platform.OS !== 'ios' && Platform.OS !== 'android' && (
+        <Modal
+          visible={activePicker !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setActivePicker(null)}
+        >
+          <TouchableOpacity 
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setActivePicker(null)}
+          >
+            <TouchableOpacity activeOpacity={1} style={styles.webPickerContainer}>
+              <View style={styles.iosPickerHeader}>
+                <Text style={styles.iosPickerTitle}>
+                  {activePicker === 'on' ? 'Set Power ON Time' : 'Set Power OFF Time'}
+                </Text>
+                <TouchableOpacity onPress={() => setActivePicker(null)}>
+                  <Ionicons name="close" size={20} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.webPickerBody}>
+                <Text style={styles.webPickerSubLabel}>Select Hour</Text>
+                <View style={styles.webPickerGrid}>
+                  {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(h => {
+                    const currentHours = tempPickerDate.getHours();
+                    const currentH12 = currentHours % 12 === 0 ? 12 : currentHours % 12;
+                    const isSelected = currentH12 === h;
+                    return (
+                      <TouchableOpacity
+                        key={h}
+                        style={[styles.webPickerGridBtn, isSelected && styles.webPickerGridBtnActive]}
+                        onPress={() => {
+                          const isPM = tempPickerDate.getHours() >= 12;
+                          const newH = (h % 12) + (isPM ? 12 : 0);
+                          const d = new Date(tempPickerDate);
+                          d.setHours(newH);
+                          setTempPickerDate(d);
+                        }}
+                      >
+                        <Text style={[styles.webPickerGridText, isSelected && styles.webPickerGridTextActive]}>
+                          {h}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <Text style={styles.webPickerSubLabel}>Select Minute</Text>
+                <View style={styles.webPickerGrid}>
+                  {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map(m => {
+                    const isSelected = tempPickerDate.getMinutes() === m;
+                    return (
+                      <TouchableOpacity
+                        key={m}
+                        style={[styles.webPickerGridBtn, isSelected && styles.webPickerGridBtnActive]}
+                        onPress={() => {
+                          const d = new Date(tempPickerDate);
+                          d.setMinutes(m);
+                          setTempPickerDate(d);
+                        }}
+                      >
+                        <Text style={[styles.webPickerGridText, isSelected && styles.webPickerGridTextActive]}>
+                          {String(m).padStart(2, '0')}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <View style={styles.webPickerAmPmRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.webPickerAmPmBtn,
+                      tempPickerDate.getHours() < 12 && styles.webPickerAmPmBtnActive
+                    ]}
+                    onPress={() => {
+                      if (tempPickerDate.getHours() >= 12) {
+                        const d = new Date(tempPickerDate);
+                        d.setHours(tempPickerDate.getHours() - 12);
+                        setTempPickerDate(d);
+                      }
+                    }}
+                  >
+                    <Text style={[
+                      styles.webPickerAmPmText,
+                      tempPickerDate.getHours() < 12 && styles.webPickerAmPmTextActive
+                    ]}>AM</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.webPickerAmPmBtn,
+                      tempPickerDate.getHours() >= 12 && styles.webPickerAmPmBtnActive
+                    ]}
+                    onPress={() => {
+                      if (tempPickerDate.getHours() < 12) {
+                        const d = new Date(tempPickerDate);
+                        d.setHours(tempPickerDate.getHours() + 12);
+                        setTempPickerDate(d);
+                      }
+                    }}
+                  >
+                    <Text style={[
+                      styles.webPickerAmPmText,
+                      tempPickerDate.getHours() >= 12 && styles.webPickerAmPmTextActive
+                    ]}>PM</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.saveScheduleBtn}
+                  onPress={() => {
+                    if (activePicker) {
+                      const formatted = dateToTimeString(tempPickerDate);
+                      handleTimeConfirmed(activePicker, formatted);
+                    }
+                    setActivePicker(null);
+                  }}
+                >
+                  <Text style={styles.saveScheduleBtnText}>Confirm {formatTime12h(dateToTimeString(tempPickerDate))}</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+      )}
 
       <FloatingBottomNav activeTab="classrooms" />
     </View>
@@ -2038,6 +2610,397 @@ function getStyles(colors: any, isDark: boolean) {
       fontSize: 13,
       fontWeight: '600',
       color: colors.textSecondary,
+    },
+
+    // Power Schedule & Automation Card
+    scheduleCard: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(253, 168, 58, 0.25)' : 'rgba(217, 119, 6, 0.25)',
+      marginBottom: 20,
+    },
+    scheduleHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingBottom: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.surfaceBorder,
+    },
+    scheduleTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      flex: 1,
+    },
+    scheduleIconBox: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.15)' : 'rgba(217, 119, 6, 0.12)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    scheduleTextContainer: {
+      flex: 1,
+      paddingRight: 6,
+    },
+    scheduleCardTitle: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    scheduleCardSubtitle: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginTop: 2,
+      lineHeight: 15,
+    },
+    scheduleSection: {
+      marginTop: 14,
+    },
+    scheduleSectionLabel: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
+      marginBottom: 8,
+    },
+    schedulePresetsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    schedulePresetChip: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 8,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    schedulePresetChipActive: {
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.2)' : 'rgba(217, 119, 6, 0.15)',
+      borderColor: colors.primary,
+    },
+    schedulePresetChipText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    schedulePresetChipTextActive: {
+      color: colors.primary,
+      fontWeight: '700',
+    },
+    timeSetterRow: {
+      flexDirection: 'row',
+      gap: 10,
+      marginTop: 14,
+    },
+    timePickerCard: {
+      flex: 1,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.04)' : colors.cardSecondary,
+      borderRadius: Layout.radius.md,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    timeSetterBoxHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginBottom: 6,
+    },
+    timeSetterBoxTitle: {
+      fontSize: 10,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.textMuted,
+    },
+    timeDisplayBig: {
+      color: colors.text,
+      fontSize: 17,
+      fontWeight: '800',
+      fontVariant: ['tabular-nums'],
+    },
+    timeDisplaySub: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginTop: 2,
+      marginBottom: 8,
+    },
+    pickTimeActionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 7,
+      paddingHorizontal: 10,
+      borderRadius: 6,
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.12)' : 'rgba(217, 119, 6, 0.08)',
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(253, 168, 58, 0.3)' : 'rgba(217, 119, 6, 0.25)',
+    },
+    pickTimeActionText: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.65)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 20,
+    },
+    iosPickerContainer: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      paddingBottom: 20,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      width: '100%',
+      maxWidth: 360,
+      overflow: 'hidden',
+    },
+    iosPickerHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.surfaceBorder,
+    },
+    iosPickerTitle: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    iosPickerCancel: {
+      color: colors.textMuted,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    iosPickerDone: {
+      color: colors.primary,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    webPickerContainer: {
+      backgroundColor: colors.card,
+      borderRadius: Layout.radius.lg,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      width: '100%',
+      maxWidth: 360,
+    },
+    webPickerBody: {
+      paddingTop: 8,
+    },
+    webPickerSubLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      textTransform: 'uppercase',
+      color: colors.textMuted,
+      marginBottom: 6,
+      marginTop: 8,
+    },
+    webPickerGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    webPickerGridBtn: {
+      width: 44,
+      height: 34,
+      borderRadius: 6,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    webPickerGridBtnActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    webPickerGridText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    webPickerGridTextActive: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontWeight: '700',
+    },
+    webPickerAmPmRow: {
+      flexDirection: 'row',
+      gap: 10,
+      marginTop: 12,
+      marginBottom: 6,
+    },
+    webPickerAmPmBtn: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    webPickerAmPmBtnActive: {
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.2)' : 'rgba(217, 119, 6, 0.15)',
+      borderColor: colors.primary,
+    },
+    webPickerAmPmText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    webPickerAmPmTextActive: {
+      color: colors.primary,
+      fontWeight: '700',
+    },
+    daysHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    daysPresetRow: {
+      flexDirection: 'row',
+      gap: 6,
+    },
+    dayFilterBtn: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)',
+    },
+    dayFilterBtnText: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    daysChipsRow: {
+      flexDirection: 'row',
+      gap: 6,
+      justifyContent: 'space-between',
+    },
+    dayChip: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    dayChipActive: {
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.2)' : 'rgba(217, 119, 6, 0.15)',
+      borderColor: colors.primary,
+    },
+    dayChipText: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    dayChipTextActive: {
+      color: colors.primary,
+      fontWeight: '700',
+    },
+    autoOffDivider: {
+      height: 1,
+      backgroundColor: colors.surfaceBorder,
+      marginVertical: 14,
+    },
+    autoOffHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    autoOffTitleCol: {
+      flex: 1,
+      paddingRight: 8,
+    },
+    autoOffTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    autoOffTitle: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    autoOffSubtitle: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    autoOffBody: {
+      marginTop: 12,
+    },
+    autoOffChipsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    autoOffChip: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : colors.cardSecondary,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    autoOffChipActive: {
+      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.2)' : 'rgba(217, 119, 6, 0.15)',
+      borderColor: colors.primary,
+    },
+    autoOffChipText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    autoOffChipTextActive: {
+      color: colors.primary,
+      fontWeight: '700',
+    },
+    autoOffLiveStatus: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 10,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: 6,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)',
+    },
+    autoOffLiveText: {
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    saveScheduleBtn: {
+      marginTop: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primary,
+      paddingVertical: 12,
+      borderRadius: Layout.radius.md,
+      gap: 8,
+    },
+    saveScheduleBtnText: {
+      color: isDark ? '#000000' : '#FFFFFF',
+      fontSize: 13,
+      fontWeight: '700',
     },
   });
 }

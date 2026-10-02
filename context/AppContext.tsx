@@ -5,7 +5,7 @@ import { playChimeWebAudio } from '../lib/audioChimes';
 import {
   User, Campus, Classroom, Device, Controller, Alert, NotificationItem, ActivityItem, EnergyReading,
   DeviceCategory, DeviceStatus, DeviceCapability, ClassroomStatus, OccupancyStatus, AlertSeverity, NotificationType,
-  ESP32Telemetry, NoticeItem, NoticeDuration, TimetableConfig, TimetablePeriod, BellPattern,
+  ESP32Telemetry, NoticeItem, NoticeDuration, TimetableConfig, TimetablePeriod, BellPattern, DeviceSchedule,
 } from '../types';
 import {
   mockUser, mockCampus, mockClassrooms, mockAlerts, mockNotifications, mockEnergyData, devsA101, devsCorridor, defaultTimetable,
@@ -51,6 +51,7 @@ interface AppContextType {
   dismissAlert: (id: string) => void;
   updateDeviceValue: (classroomId: string, deviceId: string, updates: Partial<Device>) => void;
   updateDeviceRatedPower: (classroomId: string, deviceId: string, ratedWatts: number) => Promise<void>;
+  updateDeviceSchedule: (classroomId: string, deviceId: string, schedule: DeviceSchedule) => void;
   esp32Ip: string;
   setEsp32Ip: (ip: string) => Promise<void>;
   esp32Connected: boolean;
@@ -94,7 +95,7 @@ const STORAGE_KEYS = {
   LOGGED_IN_USER: '@logged_in_user',
 };
 
-const SETTING_KEYS = ['brightness', 'speed', 'temperature', 'mode', 'fanSpeed', 'volume', 'source', 'direction', 'colorTemp', 'color', 'rgbMode'] as const;
+const SETTING_KEYS = ['brightness', 'speed', 'temperature', 'mode', 'fanSpeed', 'volume', 'source', 'direction', 'colorTemp', 'color', 'rgbMode', 'schedule'] as const;
 
 function deviceSettings(dev: Device): Record<string, unknown> {
   const s: Record<string, unknown> = {};
@@ -1321,12 +1322,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (cls.id !== classroomId) return cls;
       const updatedDevices = cls.devices.map(dev => {
         if (dev.id !== deviceId) return dev;
+        const sched = dev.schedule;
+        const autoOffStartedAt = newStatus === 'on' && sched?.autoOffEnabled ? new Date().toISOString() : null;
         return {
           ...dev,
           status: newStatus,
           ratedPower: rated,
           powerUsage,
           lastUpdated: new Date().toISOString(),
+          schedule: sched ? { ...sched, autoOffStartedAt } : undefined,
         };
       });
 
@@ -1505,6 +1509,189 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     showToast(`Rated load updated to ${ratedWatts}W`, 'success');
   }, [esp32Ip, showToast]);
+
+  const updateDeviceSchedule = useCallback((classroomId: string, deviceId: string, schedule: DeviceSchedule) => {
+    let targetSettings: Record<string, unknown> | null = null;
+    setClassrooms(prev => prev.map(cls => {
+      if (cls.id !== classroomId) return cls;
+      return {
+        ...cls,
+        devices: cls.devices.map(dev => {
+          if (dev.id !== deviceId) return dev;
+          const updated: Device = {
+            ...dev,
+            schedule,
+            lastUpdated: new Date().toISOString(),
+          };
+          targetSettings = deviceSettings(updated);
+          return updated;
+        }),
+      };
+    }));
+
+    if (targetSettings) {
+      void syncDevices([{ id: deviceId, data: { settings: targetSettings } }]);
+    }
+
+    // Direct Instant Sync over local Wi-Fi to ESP32 onboard hardware flash memory
+    if (esp32Ip && esp32Ip.trim() !== '') {
+      const cleanIp = esp32Ip.trim();
+      const baseUrl = cleanIp.startsWith('http') ? cleanIp : `http://${cleanIp}`;
+
+      // 1. Post schedule directly into ESP32 NVS flash memory
+      fetch(`${baseUrl}/api/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: deviceId, schedule }),
+      }).catch(() => {});
+
+      // 2. Sync phone's current epoch timestamp to ESP32 hardware RTC clock
+      // Ensures accurate 24/7 onboard scheduling even without active internet/WAN!
+      const currentEpoch = Math.floor(Date.now() / 1000);
+      fetch(`${baseUrl}/api/time?epoch=${currentEpoch}`).catch(() => {});
+    }
+
+    showToast(schedule.enabled ? 'Schedule saved and activated' : 'Schedule disabled', 'success');
+  }, [esp32Ip, showToast, syncDevices]);
+
+  // ─── Automated Device Schedule & Countdown Timer Engine ─────────────
+  const lastScheduleTriggerRef = useRef<Record<string, { on?: string; off?: string }>>({});
+
+  useEffect(() => {
+    const checkSchedules = () => {
+      const now = new Date();
+      const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // 1=Mon .. 7=Sun
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const currentTimeStr = `${hh}:${mm}`;
+      const todayDateStr = now.toISOString().slice(0, 10);
+
+      setClassrooms(prevClassrooms => {
+        let changed = false;
+
+        const updatedClassrooms = prevClassrooms.map(cls => {
+          let clsChanged = false;
+
+          const updatedDevices = cls.devices.map(dev => {
+            const sched = dev.schedule;
+            if (!sched || !sched.enabled) return dev;
+
+            const triggerKey = `${dev.id}-${todayDateStr}`;
+            const lastTriggers = lastScheduleTriggerRef.current[triggerKey] || {};
+
+            let newStatus = dev.status;
+            let statusChanged = false;
+            let autoOffStarted = sched.autoOffStartedAt;
+
+            // 1. Check Daily Scheduled ON Time
+            const dayActive = !sched.days || sched.days.length === 0 || sched.days.includes(currentDay);
+            if (dayActive && sched.onTime && sched.onTime === currentTimeStr && lastTriggers.on !== currentTimeStr) {
+              if (dev.status !== 'on') {
+                newStatus = 'on';
+                statusChanged = true;
+                if (sched.autoOffEnabled && sched.autoOffMinutes) {
+                  autoOffStarted = now.toISOString();
+                }
+                lastScheduleTriggerRef.current[triggerKey] = {
+                  ...lastTriggers,
+                  on: currentTimeStr,
+                };
+                showToast(`[Schedule] ${dev.name} powered ON`, 'info');
+              }
+            }
+
+            // 2. Check Daily Scheduled OFF Time
+            if (dayActive && sched.offTime && sched.offTime === currentTimeStr && lastTriggers.off !== currentTimeStr) {
+              if (dev.status === 'on') {
+                newStatus = 'off';
+                statusChanged = true;
+                autoOffStarted = null;
+                lastScheduleTriggerRef.current[triggerKey] = {
+                  ...lastTriggers,
+                  off: currentTimeStr,
+                };
+                showToast(`[Schedule] ${dev.name} powered OFF`, 'info');
+              }
+            }
+
+            // 3. Check Auto-off Countdown Timer
+            if (sched.autoOffEnabled && sched.autoOffMinutes && dev.status === 'on' && autoOffStarted) {
+              const elapsedMs = now.getTime() - new Date(autoOffStarted).getTime();
+              const limitMs = sched.autoOffMinutes * 60 * 1000;
+              if (elapsedMs >= limitMs) {
+                newStatus = 'off';
+                statusChanged = true;
+                autoOffStarted = null;
+                showToast(`[Timer] ${dev.name} automatically powered OFF (${sched.autoOffMinutes}m)`, 'info');
+              }
+            }
+
+            if (statusChanged) {
+              clsChanged = true;
+              changed = true;
+              const rated = dev.ratedPower || (dev.category === 'fan' ? 75 : dev.category === 'light' ? 60 : 40);
+              const newUsage = newStatus === 'on' ? rated : 0;
+              const updatedDev: Device = {
+                ...dev,
+                status: newStatus,
+                powerUsage: newUsage,
+                lastUpdated: now.toISOString(),
+                schedule: {
+                  ...sched,
+                  autoOffStartedAt: autoOffStarted,
+                },
+              };
+
+              // Dispatch to hardware & Supabase
+              void (async () => {
+                const espDev = mapDeviceToEsp32Code(cls.id, dev);
+                if (esp32Ip && esp32Ip.trim()) {
+                  try {
+                    const ac = new AbortController();
+                    const to = setTimeout(() => ac.abort(), 1200);
+                    await fetch(`http://${esp32Ip}/ctrl?dev=${espDev}&st=${newStatus === 'on' ? 1 : 0}`, { signal: ac.signal });
+                    clearTimeout(to);
+                  } catch {}
+                }
+                const st = deviceSettings(updatedDev);
+                void syncDevices([{
+                  id: dev.id,
+                  data: {
+                    status: newStatus,
+                    power_usage: newUsage,
+                    settings: st,
+                  },
+                }]);
+              })();
+
+              return updatedDev;
+            }
+
+            return dev;
+          });
+
+          if (clsChanged) {
+            const hasPhysicalSensor = cls.hasPowerMeter && cls.voltage && cls.voltage >= 60 && cls.current && cls.current >= 0.09;
+            const newLoad = hasPhysicalSensor 
+              ? cls.currentLoad 
+              : updatedDevices.reduce((sum, d) => sum + (d.status === 'on' ? (d.powerUsage || 0) : 0), 0);
+            return {
+              ...cls,
+              currentLoad: newLoad,
+              devices: updatedDevices,
+            };
+          }
+
+          return cls;
+        });
+
+        return changed ? updatedClassrooms : prevClassrooms;
+      });
+    };
+
+    const interval = setInterval(checkSchedules, 15000);
+    return () => clearInterval(interval);
+  }, [esp32Ip, showToast, syncDevices]);
 
   const toggleQuickControl = useCallback((control: keyof QuickControls) => {
     setQuickControls(prev => {
@@ -2170,7 +2357,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleDevice, toggleQuickControl, emergencyOff,
       addClassroom, addDevice,
       markNotificationRead, markAllNotificationsRead, deleteNotification, clearAllNotifications,
-      dismissAlert, updateDeviceValue, updateDeviceRatedPower,
+      dismissAlert, updateDeviceValue, updateDeviceRatedPower, updateDeviceSchedule,
       esp32Ip, setEsp32Ip, esp32Connected, esp32Telemetry,
       systemMode, setSystemMode,
       syncWithEsp32, toggleEsp32Mode,

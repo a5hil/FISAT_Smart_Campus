@@ -59,10 +59,21 @@ export interface Device {
   source?: string;
   color?: string;
   rgbMode?: string;
+  schedule?: DeviceSchedule;
   powerUsage: number;
   ratedPower?: number;
   energyToday: number;
   lastUpdated: string;
+}
+
+export interface DeviceSchedule {
+  enabled: boolean;
+  onTime: string;          // "HH:mm" 24h format
+  offTime: string;         // "HH:mm" 24h format
+  days: number[];          // 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun
+  autoOffEnabled?: boolean;
+  autoOffMinutes?: number; // Duration in minutes (e.g. 30, 60)
+  autoOffStartedAt?: string | null; // Timestamp when current on session started for auto-off
 }
 
 export interface Controller {

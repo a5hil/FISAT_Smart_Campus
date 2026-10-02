@@ -134,6 +134,22 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
               {getStatusText()}
             </Text>
           </View>
+          {Boolean((device.schedule?.enabled && (device.schedule?.onTime || device.schedule?.offTime)) || device.schedule?.autoOffEnabled) && (
+            <View style={[
+              styles.scheduleBadge,
+              {
+                backgroundColor: isDark ? 'rgba(253, 168, 58, 0.12)' : 'rgba(217, 119, 6, 0.08)',
+                borderColor: isDark ? 'rgba(253, 168, 58, 0.3)' : 'rgba(217, 119, 6, 0.25)',
+              }
+            ]}>
+              <Ionicons name="time-outline" size={10} color={colors.primary} />
+              <Text style={[styles.scheduleBadgeText, { color: colors.primary }]} numberOfLines={1}>
+                {device.schedule?.enabled
+                  ? `${device.schedule.onTime || '08:30'} - ${device.schedule.offTime || '17:00'}`
+                  : `Auto-off ${device.schedule?.autoOffMinutes ?? 60}m`}
+              </Text>
+            </View>
+          )}
         </View>
 
         <TouchableOpacity
@@ -240,5 +256,20 @@ const styles = StyleSheet.create({
   settingsButtonActive: {
     backgroundColor: 'rgba(253, 168, 58, 0.12)',
     borderColor: 'rgba(253, 168, 58, 0.3)',
+  },
+  scheduleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    marginTop: 3,
+  },
+  scheduleBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
   },
 });

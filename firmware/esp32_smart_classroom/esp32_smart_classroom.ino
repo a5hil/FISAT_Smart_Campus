@@ -628,6 +628,249 @@ volatile bool pendingModeCloudSync = false;
 volatile bool pendingIpCloudSync = true;
 unsigned long lastLocalModeChange = 0;
 
+// ==========================================
+// --- 24/7 AUTONOMOUS ONBOARD DEVICE SCHEDULING ENGINE ---
+// ==========================================
+// Evaluates schedule rules directly on the ESP32 hardware RTC timer.
+// Fully autonomous: runs 24/7 even if phone is off, app is closed, or Wi-Fi/Internet drops!
+struct FirmwareDeviceSchedule {
+  const char* devCode;       // "l1", "f1", "c1", "nb", "ss", "l2", "f2", "c2", "cr1", "cr2", "rgb"
+  const char* primaryId;     // App Supabase ID, e.g. "dev-a101-light-1"
+  const char* nvsKey;        // NVS flash key (max 15 chars), e.g. "sc_c1_l"
+  bool enabled;
+  int onHour;                // 0-23, or -1 if disabled
+  int onMin;                 // 0-59, or -1 if disabled
+  int offHour;               // 0-23, or -1 if disabled
+  int offMin;                // 0-59, or -1 if disabled
+  uint8_t days;              // Bitmask: bit 0 = Sun, bit 1 = Mon, ..., bit 6 = Sat (0x7F = all days)
+  bool autoOffEnabled;       // If true, automatically shuts down after autoOffMinutes of being turned ON
+  int autoOffMinutes;        // Minutes to run before automatic shutdown
+  unsigned long turnOnTimestampMs;
+  int lastTriggeredOnDay;
+  int lastTriggeredOnMin;
+  int lastTriggeredOffDay;
+  int lastTriggeredOffMin;
+};
+
+#define NUM_SCHEDULED_DEVICES 11
+FirmwareDeviceSchedule deviceSchedules[NUM_SCHEDULED_DEVICES] = {
+  { "l1",  "dev-a101-light-1",     "sc_c1_l",  false, -1, -1, -1, -1, 0x7F, false, 0, 0, -1, -1, -1, -1 },
+  { "f1",  "dev-a101-fan-1",       "sc_c1_f",  false, -1, -1, -1, -1, 0x7F, false, 0, 0, -1, -1, -1, -1 },
+  { "c1",  "dev-a101-curtain",     "sc_c1_c",  false, -1, -1, -1, -1, 0x7F, false, 0, 0, -1, -1, -1, -1 },
+  { "nb",  "dev-a101-notice-board", "sc_c1_nb", false, -1, -1, -1, -1, 0x7F, false, 0, 0, -1, -1, -1, -1 },
+  { "ss",  "dev-a101-smart-screen", "sc_c1_ss", false, -1, -1, -1, -1, 0x7F, false, 0, 0, -1, -1, -1, -1 },
+  { "l2",  "dev-a102-light-1",     "sc_c2_l",  false, -1, -1, -1, -1, 0x7F, false, 0, 0, -1, -1, -1, -1 },
+  { "f2",  "dev-a102-fan-1",       "sc_c2_f",  false, -1, -1, -1, -1, 0x7F, false, 0, 0, -1, -1, -1, -1 },
+  { "c2",  "dev-a102-curtain",     "sc_c2_c",  false, -1, -1, -1, -1, 0x7F, false, 0, 0, -1, -1, -1, -1 },
+  { "cr1", "dev-corr-light-1",     "sc_cr1",   false, -1, -1, -1, -1, 0x7F, false, 0, 0, -1, -1, -1, -1 },
+  { "cr2", "dev-corr-light-2",     "sc_cr2",   false, -1, -1, -1, -1, 0x7F, false, 0, 0, -1, -1, -1, -1 },
+  { "rgb", "dev-corr-rgb-strip",   "sc_ws",    false, -1, -1, -1, -1, 0x7F, false, 0, 0, -1, -1, -1, -1 }
+};
+
+// Queue for asynchronous background cloud sync of device state changes
+volatile uint16_t pendingDeviceCloudSyncMask = 0;
+
+int getDeviceScheduleIndex(const String& devId) {
+  String d = devId;
+  d.toLowerCase();
+  if (d == "l1" || d == "light1" || d.indexOf("a101-light") >= 0) return 0;
+  if (d == "f1" || d == "fan1" || d.indexOf("a101-fan") >= 0) return 1;
+  if (d == "c1" || d == "curtain1" || d.indexOf("a101-curtain") >= 0) return 2;
+  if (d == "nb" || d == "notice" || d.indexOf("a101-notice") >= 0) return 3;
+  if (d == "ss" || d == "smart" || d.indexOf("a101-smart") >= 0 || d.indexOf("a101-screen") >= 0) return 4;
+  if (d == "l2" || d == "light2" || d.indexOf("a102-light") >= 0) return 5;
+  if (d == "f2" || d == "fan2" || d.indexOf("a102-fan") >= 0) return 6;
+  if (d == "c2" || d == "curtain2" || d.indexOf("a102-curtain") >= 0) return 7;
+  if (d == "cr1" || d == "corr1" || d.indexOf("corr-light1") >= 0 || d.indexOf("corr-light-1") >= 0) return 8;
+  if (d == "cr2" || d == "corr2" || d.indexOf("corr-light2") >= 0 || d.indexOf("corr-light-2") >= 0) return 9;
+  if (d == "rgb" || d == "ws2812" || d.indexOf("rgb-strip") >= 0) return 10;
+  return -1;
+}
+
+bool getDeviceCurrentState(const String& dev) {
+  String d = dev;
+  d.toLowerCase();
+  if (d == "l1" || d == "light1" || d.indexOf("a101-light") >= 0) return state_c1_light;
+  if (d == "f1" || d == "fan1" || d.indexOf("a101-fan") >= 0) return state_c1_fan;
+  if (d == "c1" || d == "curtain1" || d.indexOf("a101-curtain") >= 0) return state_c1_curtain;
+  if (d == "nb" || d == "notice" || d.indexOf("a101-notice") >= 0) return state_c1_notice_screen;
+  if (d == "ss" || d == "smart" || d.indexOf("a101-smart") >= 0 || d.indexOf("a101-screen") >= 0) return state_c1_smart_screen;
+  if (d == "l2" || d == "light2" || d.indexOf("a102-light") >= 0) return state_c2_light;
+  if (d == "f2" || d == "fan2" || d.indexOf("a102-fan") >= 0) return state_c2_fan;
+  if (d == "c2" || d == "curtain2" || d.indexOf("a102-curtain") >= 0) return state_c2_curtain;
+  if (d == "cr1" || d == "corr1" || d.indexOf("corr-light1") >= 0 || d.indexOf("corr-light-1") >= 0) return state_corr1_light;
+  if (d == "cr2" || d == "corr2" || d.indexOf("corr-light2") >= 0 || d.indexOf("corr-light-2") >= 0) return state_corr2_light;
+  if (d == "rgb" || d == "ws2812" || d.indexOf("rgb-strip") >= 0) return state_ws2812;
+  return false;
+}
+
+void queueDeviceCloudSync(int idx, bool isOn) {
+  if (idx < 0 || idx >= NUM_SCHEDULED_DEVICES) return;
+  // Update local baseline tracking variables so upcoming DB poll doesn't fight scheduled change
+  if (idx == 0) cloud_prev_c1_light = isOn;
+  else if (idx == 1) cloud_prev_c1_fan = isOn;
+  else if (idx == 2) cloud_prev_c1_curtain = isOn;
+  else if (idx == 3) cloud_prev_c1_notice_board = isOn;
+  else if (idx == 4) cloud_prev_c1_smart_screen = isOn;
+  else if (idx == 5) cloud_prev_c2_light = isOn;
+  else if (idx == 6) cloud_prev_c2_fan = isOn;
+  else if (idx == 7) cloud_prev_c2_curtain = isOn;
+  else if (idx == 8) cloud_prev_corr1_light = isOn;
+  else if (idx == 9) cloud_prev_corr2_light = isOn;
+  else if (idx == 10) cloud_prev_ws2812 = isOn;
+
+  pendingDeviceCloudSyncMask |= (1 << idx);
+}
+
+bool parseDeviceSchedule(int idx, JsonVariantConst sObj) {
+  if (idx < 0 || idx >= NUM_SCHEDULED_DEVICES) return false;
+  FirmwareDeviceSchedule &sched = deviceSchedules[idx];
+
+  sched.enabled = sObj["enabled"] | false;
+
+  const char *onStr = sObj["onTime"] | "";
+  if (strlen(onStr) >= 4 && sscanf(onStr, "%d:%d", &sched.onHour, &sched.onMin) == 2) {
+    // Valid onTime parsed
+  } else {
+    sched.onHour = -1;
+    sched.onMin = -1;
+  }
+
+  const char *offStr = sObj["offTime"] | "";
+  if (strlen(offStr) >= 4 && sscanf(offStr, "%d:%d", &sched.offHour, &sched.offMin) == 2) {
+    // Valid offTime parsed
+  } else {
+    sched.offHour = -1;
+    sched.offMin = -1;
+  }
+
+  if (sObj.containsKey("days") && sObj["days"].is<JsonArrayConst>()) {
+    sched.days = 0;
+    for (int d : sObj["days"].as<JsonArrayConst>()) {
+      if (d >= 0 && d <= 7) {
+        int wday = (d == 7) ? 0 : d; // ISO 7 (Sun) maps to 0 for tm_wday
+        sched.days |= (1 << wday);
+      }
+    }
+  } else {
+    sched.days = 0x7F; // Default all 7 days
+  }
+
+  sched.autoOffEnabled = sObj["autoOffEnabled"] | false;
+  sched.autoOffMinutes = sObj["autoOffMinutes"] | 0;
+
+  Serial.printf("[SCHEDULE] Configured %s (%s): en=%d, ON=%02d:%02d, OFF=%02d:%02d, days=0x%02X, autoOff=%d (%dm)\n",
+                sched.devCode, sched.primaryId, sched.enabled, sched.onHour, sched.onMin, sched.offHour, sched.offMin,
+                sched.days, sched.autoOffEnabled, sched.autoOffMinutes);
+  return true;
+}
+
+void saveDeviceScheduleToNVS(int idx, const String& jsonStr) {
+  if (idx < 0 || idx >= NUM_SCHEDULED_DEVICES) return;
+  preferences.putString(deviceSchedules[idx].nvsKey, jsonStr);
+}
+
+void loadDeviceSchedulesFromNVS() {
+  Serial.println(F("[SCHEDULE] Loading persistent device schedules from NVS flash..."));
+  int loadedCount = 0;
+  for (int i = 0; i < NUM_SCHEDULED_DEVICES; i++) {
+    String stored = preferences.getString(deviceSchedules[i].nvsKey, "");
+    if (stored.length() > 5) {
+      StaticJsonDocument<512> doc;
+      DeserializationError err = deserializeJson(doc, stored);
+      if (!err) {
+        parseDeviceSchedule(i, doc.as<JsonVariantConst>());
+        loadedCount++;
+      }
+    }
+  }
+  Serial.printf("[SCHEDULE] %d active schedules restored from flash memory.\n", loadedCount);
+}
+
+// Forward declarations
+void applyDeviceControl(String dev, bool st);
+
+void checkDeviceSchedules() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo, 10)) {
+    return; // Hardware RTC has not yet acquired epoch from NTP or /api/time
+  }
+
+  // Evaluate exactly once per minute
+  static int lastCheckedMin = -1;
+  if (timeinfo.tm_min == lastCheckedMin) {
+    return;
+  }
+  lastCheckedMin = timeinfo.tm_min;
+
+  int currentHour = timeinfo.tm_hour;
+  int currentMin = timeinfo.tm_min;
+  int currentDay = timeinfo.tm_wday; // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  int currentDayBit = (1 << currentDay);
+
+  for (int i = 0; i < NUM_SCHEDULED_DEVICES; i++) {
+    FirmwareDeviceSchedule &sched = deviceSchedules[i];
+    if (!sched.enabled) continue;
+    if (!(sched.days & currentDayBit)) continue;
+
+    // Check Turn ON time match
+    if (sched.onHour == currentHour && sched.onMin == currentMin) {
+      if (sched.lastTriggeredOnDay != currentDay || sched.lastTriggeredOnMin != currentMin) {
+        sched.lastTriggeredOnDay = currentDay;
+        sched.lastTriggeredOnMin = currentMin;
+        sched.turnOnTimestampMs = millis();
+        Serial.printf("[SCHEDULE ENGINE] Triggered ON for %s (%s) at %02d:%02d\n",
+                      sched.devCode, sched.primaryId, currentHour, currentMin);
+
+        // If Auto Mode was active, disarm to Manual so motion sensors don't conflict
+        if (isAutoMode) {
+          setSystemModeInternal(false, true);
+        }
+        applyDeviceControl(sched.devCode, true);
+        queueDeviceCloudSync(i, true);
+      }
+    }
+
+    // Check Turn OFF time match
+    if (sched.offHour == currentHour && sched.offMin == currentMin) {
+      if (sched.lastTriggeredOffDay != currentDay || sched.lastTriggeredOffMin != currentMin) {
+        sched.lastTriggeredOffDay = currentDay;
+        sched.lastTriggeredOffMin = currentMin;
+        sched.turnOnTimestampMs = 0;
+        Serial.printf("[SCHEDULE ENGINE] Triggered OFF for %s (%s) at %02d:%02d\n",
+                      sched.devCode, sched.primaryId, currentHour, currentMin);
+
+        applyDeviceControl(sched.devCode, false);
+        queueDeviceCloudSync(i, false);
+      }
+    }
+  }
+}
+
+void checkAutoOffTimers() {
+  unsigned long now = millis();
+  for (int i = 0; i < NUM_SCHEDULED_DEVICES; i++) {
+    FirmwareDeviceSchedule &sched = deviceSchedules[i];
+    if (!sched.autoOffEnabled || sched.autoOffMinutes <= 0) continue;
+    if (sched.turnOnTimestampMs == 0) continue;
+
+    bool isCurrentlyOn = getDeviceCurrentState(sched.devCode);
+    if (!isCurrentlyOn) {
+      sched.turnOnTimestampMs = 0;
+      continue;
+    }
+
+    unsigned long durationMs = (unsigned long)sched.autoOffMinutes * 60000UL;
+    if (now - sched.turnOnTimestampMs >= durationMs) {
+      Serial.printf("[AUTO-OFF TIMER] %s (%s) auto-off expired (%d mins). Turning OFF.\n",
+                    sched.devCode, sched.primaryId, sched.autoOffMinutes);
+      sched.turnOnTimestampMs = 0;
+      applyDeviceControl(sched.devCode, false);
+      queueDeviceCloudSync(i, false);
+    }
+  }
+}
+
 // OLED Hardware flag
 bool oledFound = false;
 
@@ -1331,6 +1574,16 @@ void handleMode() {
 // Supports legacy query params (dev=l1&st=1) AND modern app device IDs
 void applyDeviceControl(String dev, bool st) {
   dev.toLowerCase();
+
+  // Track turn-on timestamp for onboard auto-off countdown timer
+  int schedIdx = getDeviceScheduleIndex(dev);
+  if (schedIdx >= 0) {
+    if (st) {
+      deviceSchedules[schedIdx].turnOnTimestampMs = millis();
+    } else {
+      deviceSchedules[schedIdx].turnOnTimestampMs = 0;
+    }
+  }
 
   // Classroom 1 / A101
   if (dev == "l1" || dev == "light1" || dev == "dev-a101-light" ||
@@ -2542,6 +2795,108 @@ void handleTimetablePost() {
 }
 
 // ==========================================
+// --- REST API: 24/7 DEVICE SCHEDULES ---
+// ==========================================
+void handleScheduleGet() {
+  enableCORS();
+  if (server.hasArg("id") || server.hasArg("dev")) {
+    String id = server.hasArg("id") ? server.arg("id") : server.arg("dev");
+    int idx = getDeviceScheduleIndex(id);
+    if (idx >= 0) {
+      FirmwareDeviceSchedule &s = deviceSchedules[idx];
+      StaticJsonDocument<512> doc;
+      doc["id"] = s.primaryId;
+      doc["dev"] = s.devCode;
+      doc["enabled"] = s.enabled;
+      char onBuf[6], offBuf[6];
+      if (s.onHour >= 0 && s.onMin >= 0) snprintf(onBuf, sizeof(onBuf), "%02d:%02d", s.onHour, s.onMin); else strcpy(onBuf, "");
+      if (s.offHour >= 0 && s.offMin >= 0) snprintf(offBuf, sizeof(offBuf), "%02d:%02d", s.offHour, s.offMin); else strcpy(offBuf, "");
+      doc["onTime"] = onBuf;
+      doc["offTime"] = offBuf;
+      JsonArray dArr = doc.createNestedArray("days");
+      for (int d = 0; d < 7; d++) {
+        if (s.days & (1 << d)) dArr.add(d);
+      }
+      doc["autoOffEnabled"] = s.autoOffEnabled;
+      doc["autoOffMinutes"] = s.autoOffMinutes;
+      String out;
+      serializeJson(doc, out);
+      server.send(200, "application/json", out);
+      return;
+    }
+    server.send(404, "application/json", "{\"error\":\"device not found\"}");
+    return;
+  }
+
+  // Return all device schedules
+  StaticJsonDocument<3072> doc;
+  JsonArray arr = doc.to<JsonArray>();
+  for (int i = 0; i < NUM_SCHEDULED_DEVICES; i++) {
+    FirmwareDeviceSchedule &s = deviceSchedules[i];
+    JsonObject o = arr.createNestedObject();
+    o["id"] = s.primaryId;
+    o["dev"] = s.devCode;
+    o["enabled"] = s.enabled;
+    char onBuf[6], offBuf[6];
+    if (s.onHour >= 0 && s.onMin >= 0) snprintf(onBuf, sizeof(onBuf), "%02d:%02d", s.onHour, s.onMin); else strcpy(onBuf, "");
+    if (s.offHour >= 0 && s.offMin >= 0) snprintf(offBuf, sizeof(offBuf), "%02d:%02d", s.offHour, s.offMin); else strcpy(offBuf, "");
+    o["onTime"] = onBuf;
+    o["offTime"] = offBuf;
+    JsonArray dArr = o.createNestedArray("days");
+    for (int d = 0; d < 7; d++) {
+      if (s.days & (1 << d)) dArr.add(d);
+    }
+    o["autoOffEnabled"] = s.autoOffEnabled;
+    o["autoOffMinutes"] = s.autoOffMinutes;
+  }
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+void handleSchedulePost() {
+  enableCORS();
+  if (!server.hasArg("plain") && !server.hasArg("id")) {
+    server.send(400, "application/json", "{\"error\":\"Missing body or query parameters\"}");
+    return;
+  }
+
+  String targetId = "";
+  StaticJsonDocument<1024> doc;
+
+  if (server.hasArg("plain")) {
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    if (err) {
+      server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+      return;
+    }
+    if (doc.containsKey("id")) {
+      targetId = doc["id"].as<String>();
+    }
+  }
+  if (targetId.length() == 0 && server.hasArg("id")) {
+    targetId = server.arg("id");
+  }
+
+  int idx = getDeviceScheduleIndex(targetId);
+  if (idx < 0) {
+    server.send(404, "application/json", "{\"error\":\"Device ID not recognized\"}");
+    return;
+  }
+
+  JsonVariantConst schedObj = doc.containsKey("schedule") ? doc["schedule"].as<JsonVariantConst>() : doc.as<JsonVariantConst>();
+  if (parseDeviceSchedule(idx, schedObj)) {
+    String serialized;
+    serializeJson(schedObj, serialized);
+    saveDeviceScheduleToNVS(idx, serialized);
+    Serial.printf("[SCHEDULE REST] Updated & saved schedule for %s: %s\n", targetId.c_str(), serialized.c_str());
+    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Schedule saved and activated\"}");
+  } else {
+    server.send(400, "application/json", "{\"error\":\"Failed to parse schedule\"}");
+  }
+}
+
+// ==========================================
 // --- REST API: ROOT ---
 // ==========================================
 void handleRoot() {
@@ -2716,6 +3071,7 @@ void setup() {
   rated_ws2812 = preferences.getFloat("r_ws2812", WATTS_WS2812_STRIP);
   loadNoticesFromNVS(); // Immediately restore notices onto Notice OLED on boot
   loadTimetableFromNVS(); // Restore timetable schedule from NVS flash memory
+  loadDeviceSchedulesFromNVS(); // Restore 24/7 autonomous device schedules from NVS flash memory
   cloud_prev_system_auto = isAutoMode;
   Serial.printf("[SYSTEM] Boot System Mode: %s | Restored Energy: C1=%.4f kWh, "
                 "C2=%.4f kWh\n",
@@ -2927,6 +3283,12 @@ void setup() {
   server.on("/api/timetable", HTTP_GET, handleTimetableGet);
   server.on("/api/timetable", HTTP_POST, handleTimetablePost);
   server.on("/api/timetable", HTTP_OPTIONS, handleOptions);
+  server.on("/api/schedule", HTTP_GET, handleScheduleGet);
+  server.on("/api/schedule", HTTP_POST, handleSchedulePost);
+  server.on("/api/schedule", HTTP_OPTIONS, handleOptions);
+  server.on("/api/schedules", HTTP_GET, handleScheduleGet);
+  server.on("/api/schedules", HTTP_POST, handleSchedulePost);
+  server.on("/api/schedules", HTTP_OPTIONS, handleOptions);
   server.on("/api/rgb", HTTP_ANY, handleApiRgb);
   server.on("/api/rgb", HTTP_OPTIONS, handleOptions);
   server.on("/ctrl/rgb", HTTP_ANY, handleApiRgb);
@@ -3032,6 +3394,38 @@ void syncWithSupabase() {
     return;
   }
 
+  // 0C. Sync Scheduled Device States to Cloud (if triggered autonomously by hardware RTC timer)
+  if (pendingDeviceCloudSyncMask != 0) {
+    for (int i = 0; i < NUM_SCHEDULED_DEVICES; i++) {
+      if (pendingDeviceCloudSyncMask & (1 << i)) {
+        pendingDeviceCloudSyncMask &= ~(1 << i);
+        const char* devId = deviceSchedules[i].primaryId;
+        bool isOn = getDeviceCurrentState(deviceSchedules[i].devCode);
+
+        WiFiClientSecure dClient;
+        dClient.setInsecure();
+        dClient.setTimeout(3000);
+        HTTPClient dHttps;
+        dHttps.setTimeout(3000);
+        String urlDev = String(SUPABASE_URL) + "/rest/v1/devices?id=eq." + String(devId);
+        if (dHttps.begin(dClient, urlDev)) {
+          dHttps.addHeader("apikey", SUPABASE_KEY);
+          dHttps.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
+          dHttps.addHeader("Content-Type", "application/json");
+          dHttps.addHeader("Prefer", "return=minimal");
+          String body = "{\"status\":\"" + String(isOn ? "on" : "off") + "\"}";
+          int res = dHttps.sendRequest("PATCH", body);
+          Serial.printf("[SCHEDULE CLOUD SYNC] Synced %s -> %s to cloud (HTTP %d)\n", devId, isOn ? "ON" : "OFF", res);
+          dHttps.end();
+          dClient.stop();
+        }
+        break; // Sync one device per cycle to avoid blocking
+      }
+    }
+    lastSupabasePoll = now;
+    return;
+  }
+
   // 1. Fetch Remote Device Commands from Supabase (Every 2500ms)
   if (now - lastSupabasePoll >= SUPABASE_POLL_INTERVAL_MS) {
     lastSupabasePoll = now;
@@ -3053,7 +3447,7 @@ void syncWithSupabase() {
         supabaseSyncActive = true;
         String payload = https.getString();
 
-        StaticJsonDocument<2048> doc;
+        StaticJsonDocument<4096> doc;
         DeserializationError err = deserializeJson(doc, payload);
         if (!err && doc.is<JsonArray>()) {
           bool anyStateChanged = false;
@@ -3062,6 +3456,24 @@ void syncWithSupabase() {
             const char *st = dev["status"];
             if (!id || !st)
               continue;
+
+            // Check for onboard schedule in settings JSONB
+            if (dev.containsKey("settings") && dev["settings"].is<JsonObject>()) {
+              JsonObject s = dev["settings"];
+              if (s.containsKey("schedule") && s["schedule"].is<JsonObject>()) {
+                int sIdx = getDeviceScheduleIndex(String(id));
+                if (sIdx >= 0) {
+                  String serialized;
+                  serializeJson(s["schedule"], serialized);
+                  String existing = preferences.getString(deviceSchedules[sIdx].nvsKey, "");
+                  if (serialized != existing) {
+                    parseDeviceSchedule(sIdx, s["schedule"]);
+                    preferences.putString(deviceSchedules[sIdx].nvsKey, serialized);
+                    Serial.printf("[SCHEDULE] Cloud sync: updated & saved schedule for %s: %s\n", id, serialized.c_str());
+                  }
+                }
+              }
+            }
 
             // 1. System Mode command from Cloud (with anti-echo shield)
             if (strcmp(id, "dev-system-mode") == 0) {
@@ -3591,6 +4003,10 @@ void loop() {
   // 1c. Non-blocking Audio Alert Buzzer & Timetable Period Bell
   handleBuzzer();
   checkTimetableBell();
+
+  // 1c1. Onboard 24/7 Autonomous Device Schedule & Countdown Timer Engine
+  checkDeviceSchedules();
+  checkAutoOffTimers();
 
   // 1c2. Non-blocking WS2812B LED Strip Animations (Breathe, Rainbow, Strobe)
   updateWs2812Animation();
