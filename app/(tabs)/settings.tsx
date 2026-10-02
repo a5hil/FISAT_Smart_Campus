@@ -197,6 +197,8 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+
+
         {/* Campus Info */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Campus Info</Text>
@@ -533,6 +535,7 @@ const getStyles = (colors: ThemeColors, isDark: boolean) =>
       fontSize: 11,
       fontWeight: '700',
     },
+
     modalOverlay: {
       flex: 1,
       backgroundColor: colors.modalOverlay,

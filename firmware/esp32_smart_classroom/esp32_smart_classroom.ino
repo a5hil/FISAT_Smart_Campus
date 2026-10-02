@@ -494,25 +494,25 @@ void loadTimetableFromNVS() {
 void checkTimetableBell() {
   if (!timetableEnabled || timetablePeriodCount == 0) return;
 
-  static int lastCheckedSec = -1;
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo, 10)) {
     return;
   }
 
-  if (timeinfo.tm_sec == lastCheckedSec) return;
-  lastCheckedSec = timeinfo.tm_sec;
+  static int lastCheckedMin = -1;
+  int currentHour = timeinfo.tm_hour;
+  int currentMin = timeinfo.tm_min;
 
-  // Evaluate at the beginning of each minute (second == 0)
-  if (timeinfo.tm_sec != 0) return;
+  // Only evaluate once when the minute changes (during the first 30 seconds of the minute)
+  // This prevents loop or network latency from ever skipping second 0 and missing the bell!
+  if (currentMin == lastCheckedMin) return;
+  if (timeinfo.tm_sec > 30) return;
+  lastCheckedMin = currentMin;
 
   int currentDayBit = (1 << timeinfo.tm_wday);
   if (!(timetableActiveDays & currentDayBit)) {
     return;
   }
-
-  int currentHour = timeinfo.tm_hour;
-  int currentMin = timeinfo.tm_min;
 
   if (currentHour == lastBellRungHour && currentMin == lastBellRungMin) {
     return;
@@ -627,6 +627,7 @@ bool cloud_prev_system_auto = false;
 volatile bool pendingModeCloudSync = false;
 volatile bool pendingIpCloudSync = true;
 unsigned long lastLocalModeChange = 0;
+unsigned long lastLocalBellTriggerMs = 0;
 
 // ==========================================
 // --- 24/7 AUTONOMOUS ONBOARD DEVICE SCHEDULING ENGINE ---
@@ -1262,10 +1263,17 @@ void updateWs2812Strip() {
   if (!state_ws2812) {
     strip.clear();
     strip.show();
+    Serial.println(F("[WS2812] Strip turned OFF"));
     return;
   }
 
+  if (ws2812_brightness < 20) {
+    ws2812_brightness = WS2812_DEFAULT_BRIGHTNESS;
+  }
   strip.setBrightness(ws2812_brightness);
+
+  Serial.printf("[WS2812] Strip turned ON | Pin: GPIO %d | LEDs: %d | Mode: %s | Color: %s | Brightness: %d\n",
+                WS2812_PIN, WS2812_NUM_LEDS, ws2812_mode.c_str(), ws2812_color.c_str(), ws2812_brightness);
 
   if (ws2812_mode == "rainbow" || ws2812_mode == "breathe" || ws2812_mode == "strobe" || ws2812_mode == "chase" || ws2812_mode == "fire") {
     // Handled dynamically in updateWs2812Animation()
@@ -1352,6 +1360,18 @@ void updateWs2812Animation() {
         strip.setPixelColor(i, strip.Color(r1, g1, b1));
       }
       strip.setBrightness(ws2812_brightness);
+      strip.show();
+    }
+  } else {
+    // Mode "solid" or default: periodically refresh strip every 1.5 seconds to guarantee LEDs stay driven
+    static unsigned long lastSolidRefresh = 0;
+    if (now - lastSolidRefresh >= 1500) {
+      lastSolidRefresh = now;
+      strip.setBrightness(ws2812_brightness);
+      uint32_t c = parseHexColor(ws2812_color);
+      for (int i = 0; i < WS2812_NUM_LEDS; i++) {
+        strip.setPixelColor(i, c);
+      }
       strip.show();
     }
   }
@@ -1650,7 +1670,7 @@ void handleControl() {
     bool st = (server.arg("st") == "1" || server.arg("st") == "true" ||
                server.arg("st") == "on");
     if (!server.hasArg("st")) {
-      st = state_ws2812;
+      st = (server.hasArg("color") || server.hasArg("mode") || server.hasArg("b") || server.hasArg("brightness")) ? true : state_ws2812;
     }
 
     if (dev == "rgb" || dev == "ws2812" || dev == "rgb_strip" || dev == "dev-corr-rgb-strip") {
@@ -1828,30 +1848,28 @@ void handleWiFiPortal() {
 
   String html = F("<!DOCTYPE html><html><head><meta charset='UTF-8'>"
                   "<meta name='viewport' content='width=device-width,initial-scale=1.0'>"
-                  "<title>NBA Smart Classroom - Wi-Fi Setup</title>"
+                  "<title>NBA Smart Classroom</title>"
                   "<style>"
-                  "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0F0F0F;color:#FFF;margin:0;padding:20px;display:flex;justify-content:center;align-items:center;min-height:100vh;box-sizing:border-box;}"
-                  ".card{background:#1A1A1A;border:1px solid #2D2D2D;border-radius:16px;padding:26px;max-width:420px;width:100%;box-shadow:0 12px 30px rgba(0,0,0,0.6);}"
-                  ".badge{display:inline-block;background:rgba(253,168,58,0.15);color:#FDA83A;font-weight:700;font-size:12px;padding:4px 10px;border-radius:20px;margin-bottom:12px;}"
-                  "h1{font-size:22px;margin:0 0 6px 0;font-weight:700;color:#FFF;}"
-                  "p{color:#A0A0A0;font-size:13px;line-height:1.5;margin:0 0 20px 0;}"
-                  "label{display:block;font-size:13px;font-weight:600;color:#DDD;margin-bottom:6px;}"
-                  "select,input[type=text],input[type=password]{width:100%;box-sizing:border-box;padding:12px 14px;border-radius:10px;background:#242424;border:1px solid #333;color:#FFF;font-size:14px;margin-bottom:16px;outline:none;}"
-                  "select:focus,input:focus{border-color:#FDA83A;}"
-                  ".btn{width:100%;padding:14px;border-radius:10px;border:none;background:#FDA83A;color:#000;font-size:15px;font-weight:700;cursor:pointer;margin-top:6px;}"
-                  ".btn:active{opacity:0.85;}"
-                  ".info{margin-top:20px;padding-top:14px;border-top:1px solid #262626;font-size:12px;color:#777;display:flex;justify-content:space-between;}"
+                  "body{font-family:sans-serif;background:#0F0F0F;color:#FFF;margin:0;padding:20px;display:flex;justify-content:center;align-items:center;min-height:100vh;box-sizing:border-box;}"
+                  ".card{background:#1A1A1A;border-radius:14px;padding:20px;max-width:380px;width:100%;box-shadow:0 8px 24px rgba(0,0,0,0.5);}"
+                  ".badge{background:rgba(253,168,58,0.15);color:#FDA83A;font-weight:700;font-size:12px;padding:3px 8px;border-radius:12px;display:inline-block;margin-bottom:8px;}"
+                  "h1{font-size:20px;margin:0 0 4px;color:#FFF;}"
+                  "p{color:#A0A0A0;font-size:12px;margin:0 0 16px;}"
+                  "label{display:block;font-size:12px;font-weight:600;color:#DDD;margin-bottom:4px;}"
+                  "select,input{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;background:#242424;border:1px solid #333;color:#FFF;font-size:14px;margin-bottom:12px;outline:none;}"
+                  ".btn{width:100%;padding:12px;border-radius:8px;border:none;background:#FDA83A;color:#000;font-size:14px;font-weight:700;cursor:pointer;margin-top:4px;}"
+                  ".info{margin-top:16px;padding-top:10px;border-top:1px solid #262626;font-size:11px;color:#777;display:flex;justify-content:space-between;}"
                   "</style></head><body>"
                   "<div class='card'>"
-                  "<div class='badge'>Controller Network Setup</div>"
-                  "<h1>Wi-Fi Configuration</h1>"
-                  "<p>Select your Wi-Fi network and enter the password to connect this classroom controller.</p>"
+                  "<div class='badge'>Controller Setup</div>"
+                  "<h1>Wi-Fi Config</h1>"
+                  "<p>Select Wi-Fi network and enter password.</p>"
                   "<form action='/savewifi' method='POST'>"
-                  "<label for='ssid'>Available Networks</label>"
+                  "<label for='ssid'>Networks</label>"
                   "<select id='ssid' name='ssid' onchange='checkCustom(this.value)'>");
 
   if (n <= 0) {
-    html += F("<option value=''>-- No networks found (Refresh to scan) --</option>");
+    html += F("<option value=''>-- No networks found (Refresh) --</option>");
   } else {
     for (int i = 0; i < n; ++i) {
       String s = WiFi.SSID(i);
@@ -1860,29 +1878,21 @@ void handleWiFiPortal() {
       html += "<option value='" + s + "'>" + s + " (" + String(r) + " dBm" + lock + ")</option>";
     }
   }
-  html += F("<option value='__custom__'>+ Enter custom / hidden SSID...</option>"
+  html += F("<option value='__custom__'>+ Enter custom SSID...</option>"
             "</select>"
             "<div id='customDiv' style='display:none;'>"
             "<label for='custom_ssid'>Custom SSID</label>"
-            "<input type='text' id='custom_ssid' name='custom_ssid' placeholder='Enter network name'>"
+            "<input type='text' id='custom_ssid' name='custom_ssid' placeholder='Network name'>"
             "</div>"
-            "<label for='password'>Wi-Fi Password</label>"
-            "<input type='password' id='password' name='password' placeholder='Enter password (leave blank if open)'>"
+            "<label for='password'>Password</label>"
+            "<input type='password' id='password' name='password' placeholder='Password'>"
             "<button type='submit' class='btn'>Connect & Save</button>"
             "</form>"
             "<div class='info'>"
             "<span>Firmware: v");
   html += FIRMWARE_VERSION;
-  html += F("</span>"
-            "<span>IP: 192.168.4.1</span>"
-            "</div>"
-            "</div>"
-            "<script>"
-            "function checkCustom(val){"
-            "  var c = document.getElementById('customDiv');"
-            "  c.style.display = (val === '__custom__') ? 'block' : 'none';"
-            "}"
-            "</script>"
+  html += F("</span><span>IP: 192.168.4.1</span></div></div>"
+            "<script>function checkCustom(v){document.getElementById('customDiv').style.display=(v==='__custom__')?'block':'none';}</script>"
             "</body></html>");
 
   server.send(200, "text/html", html);
@@ -2719,6 +2729,7 @@ void handleTimeSync() {
 // REST Handler to Test 3V Audio Buzzer
 void handleBuzzerTest() {
   enableCORS();
+  lastLocalBellTriggerMs = millis();
   if (server.hasArg("pattern")) {
     String pat = server.arg("pattern");
     playBellPattern(pat.c_str());
@@ -2731,6 +2742,7 @@ void handleBuzzerTest() {
 
 void handleBell() {
   enableCORS();
+  lastLocalBellTriggerMs = millis();
   String pat = timetableDefaultPattern;
   if (server.hasArg("pattern")) {
     pat = server.arg("pattern");
@@ -3447,9 +3459,12 @@ void syncWithSupabase() {
         supabaseSyncActive = true;
         String payload = https.getString();
 
-        StaticJsonDocument<4096> doc;
+        static StaticJsonDocument<6144> doc;
+        doc.clear();
         DeserializationError err = deserializeJson(doc, payload);
-        if (!err && doc.is<JsonArray>()) {
+        if (err) {
+          Serial.printf("[SUPABASE] JSON Deserialization error: %s (payload bytes: %d)\n", err.c_str(), payload.length());
+        } else if (doc.is<JsonArray>()) {
           bool anyStateChanged = false;
           for (JsonObject dev : doc.as<JsonArray>()) {
             const char *id = dev["id"];
@@ -3478,6 +3493,58 @@ void syncWithSupabase() {
             // 1. System Mode command from Cloud (with anti-echo shield)
             if (strcmp(id, "dev-system-mode") == 0) {
               bool cloudAuto = (strcmp(st, "auto") == 0);
+
+              // Check for cloud bell test trigger in settings JSONB
+              if (dev.containsKey("settings") && dev["settings"].is<JsonObject>()) {
+                JsonObject s = dev["settings"];
+                if (s.containsKey("bell_trigger") && s["bell_trigger"].is<JsonObject>()) {
+                  JsonObject bt = s["bell_trigger"];
+                  String ts = "";
+                  if (bt.containsKey("ts") && !bt["ts"].isNull()) {
+                    ts = bt["ts"].as<String>();
+                  } else if (bt.containsKey("timestamp") && !bt["timestamp"].isNull()) {
+                    ts = bt["timestamp"].as<String>();
+                  }
+                  static String lastExecutedBellTs = "";
+                  static bool bellBootLatch = false;
+
+                  if (ts.length() > 0 && ts != "null" && ts != "0") {
+                    if (!bellBootLatch) {
+                      // First poll after boot: latch existing timestamp so we don't ring old/stale triggers!
+                      lastExecutedBellTs = ts;
+                      bellBootLatch = true;
+                      Serial.printf("[CLOUD BELL] Startup trigger latched: %s\n", ts.c_str());
+                    } else if (ts != lastExecutedBellTs) {
+                      lastExecutedBellTs = ts;
+                      if (now - lastLocalBellTriggerMs < 8000) {
+                        Serial.printf("[CLOUD BELL] Echo suppressed: local LAN bell already played %lu ms ago\n", now - lastLocalBellTriggerMs);
+                      } else {
+                        const char* pat = bt["pattern"] | "japanese-school-bell";
+                        Serial.printf("[CLOUD BELL] Triggered via Supabase! Pattern: %s, ts: %s\n", pat, ts.c_str());
+                        playBellPattern(pat);
+                      }
+                    }
+                  }
+                }
+
+                // Check for cloud timetable configuration in settings JSONB
+                if (s.containsKey("timetable") && (s["timetable"].is<JsonObject>() || s["timetable"].is<String>())) {
+                  static String lastSyncedTimetableStr = "";
+                  String currentTtStr;
+                  if (s["timetable"].is<JsonObject>()) {
+                    serializeJson(s["timetable"], currentTtStr);
+                  } else {
+                    currentTtStr = s["timetable"].as<String>();
+                  }
+                  if (currentTtStr.length() > 10 && currentTtStr != lastSyncedTimetableStr) {
+                    lastSyncedTimetableStr = currentTtStr;
+                    if (parseTimetableJson(currentTtStr)) {
+                      saveTimetableToNVS(currentTtStr);
+                      Serial.printf("[TIMETABLE] Synced & saved %d periods from Cloud Supabase!\n", timetablePeriodCount);
+                    }
+                  }
+                }
+              }
 
               // Anti-echo protection: Ignore cloud command for 15 seconds after
               // a local change
@@ -3682,7 +3749,8 @@ void syncWithSupabase() {
                 setSmartScreenPower(isOn);
                 Serial.printf("[CLOUD COMMAND] A101 Smart Screen -> %s\n", isOn ? "ON" : "OFF");
               }
-            } else if (strcmp(id, "dev-corr-rgb-strip") == 0) {
+            } else if (strcmp(id, "dev-corr-rgb-strip") == 0 ||
+                       strcmp(id, "dev-corr-rgb") == 0) {
               bool stateChanged = (isOn != cloud_prev_ws2812);
               bool colorChanged = false;
               if (dev.containsKey("settings")) {
@@ -3711,11 +3779,13 @@ void syncWithSupabase() {
                 }
               }
               if (stateChanged || colorChanged) {
-                cloud_prev_ws2812 = isOn;
-                state_ws2812 = isOn;
+                // If color/mode was changed, turn the strip on if not explicitly off
+                bool effectiveState = colorChanged ? true : isOn;
+                cloud_prev_ws2812 = effectiveState;
+                state_ws2812 = effectiveState;
                 updateWs2812Strip();
-                Serial.printf("[CLOUD COMMAND] Corridor RGB Strip -> %s (Color: %s)\n",
-                              isOn ? "ON" : "OFF", ws2812_color.c_str());
+                Serial.printf("[CLOUD COMMAND] Corridor RGB Strip -> %s (Color: %s, Mode: %s, B: %d)\n",
+                              effectiveState ? "ON" : "OFF", ws2812_color.c_str(), ws2812_mode.c_str(), ws2812_brightness);
               }
             }
           }
@@ -3900,6 +3970,23 @@ void reconcileNoticesFromCloud(JsonArray cloudNotices) {
     }
   }
 
+  bool hasBrandNewNotice = false;
+  int brandNewNoticeIdx = 0;
+  for (int i = 0; i < updatedCount; i++) {
+    bool existed = false;
+    for (int k = 0; k < noticeCount; k++) {
+      if (notices[k].id == updated[i].id) {
+        existed = true;
+        break;
+      }
+    }
+    if (!existed) {
+      hasBrandNewNotice = true;
+      brandNewNoticeIdx = i;
+      break;
+    }
+  }
+
   bool changed = (noticeCount != updatedCount);
   if (!changed) {
     for (int i = 0; i < noticeCount; i++) {
@@ -3937,6 +4024,16 @@ void reconcileNoticesFromCloud(JsonArray cloudNotices) {
     if (singleOledNoticeIdx >= noticeCount) {
       singleOledNoticeIdx = 0;
     }
+
+    // Trigger audio chime and popup on brand new announcement from cloud!
+    if (hasBrandNewNotice) {
+      newNoticePopupUntilMs = millis() + 15000UL;
+      activeNoticePopupIndex = brandNewNoticeIdx;
+      triggerNoticeBeep();
+      Serial.printf("[NOTICE] New cloud announcement received ('%s') -> Beep & Popup triggered!\n",
+                    notices[brandNewNoticeIdx].title.c_str());
+    }
+
     saveNoticesToNVS();
     Serial.printf("[SUPABASE] Cloud notices reconciled: %d active notices.\n", noticeCount);
   }

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Vibration } from 'react-native';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { playChimeWebAudio } from '../lib/audioChimes';
 import {
@@ -108,12 +109,20 @@ function deviceSettings(dev: Device): Record<string, unknown> {
 
 // ─── ESP32 Hardware Integration Helpers ──────────────────────────────
 function mapDeviceToEsp32Code(classroomId: string, device: Device): string {
+  if (device.id === 'dev-corr-rgb-strip' || device.id.includes('rgb') || device.id.includes('strip')) {
+    return 'rgb';
+  }
+  if (device.id === 'dev-a101-notice-board' || device.id.includes('notice') || device.name?.toLowerCase().includes('notice')) {
+    return 'nb';
+  }
+  if (device.id === 'dev-a101-smart-screen' || device.id.includes('screen') || device.id.includes('smart') || device.name?.toLowerCase().includes('screen')) {
+    return 'ss';
+  }
   const isC1 = classroomId.includes('101') || classroomId === 'cls-a101';
   const isC2 = classroomId.includes('102') || classroomId === 'cls-a102';
   const isCorr = classroomId.includes('corr') || classroomId === 'cls-corridor';
 
   if (isCorr) {
-    if (device.id.includes('rgb') || device.id.includes('strip')) return 'rgb';
     return device.id.includes('2') ? 'cr2' : 'cr1';
   }
   if (isC2) {
@@ -122,8 +131,6 @@ function mapDeviceToEsp32Code(classroomId: string, device: Device): string {
     if (device.category === 'curtain') return 'c2';
   }
   if (isC1) {
-    if (device.id.includes('notice') || device.name.toLowerCase().includes('notice')) return 'nb';
-    if (device.id.includes('screen') || device.name.toLowerCase().includes('screen')) return 'ss';
     if (device.category === 'light') return 'l1';
     if (device.category === 'fan') return 'f1';
     if (device.category === 'curtain') return 'c1';
@@ -131,11 +138,11 @@ function mapDeviceToEsp32Code(classroomId: string, device: Device): string {
   return isC2 ? 'l2' : 'l1';
 }
 
-async function sendEsp32Command(ip: string, dev: string, st: boolean, timeoutMs = 3500) {
+async function sendEsp32Command(ip: string, dev: string, st: boolean, timeoutMs = 3500, extraParams = '') {
   if (!ip || ip.trim() === '') return;
   const cleanIp = ip.trim();
   const baseUrl = cleanIp.startsWith('http') ? cleanIp : `http://${cleanIp}`;
-  const url = `${baseUrl}/ctrl?dev=${encodeURIComponent(dev)}&st=${st ? '1' : '0'}&force=1`;
+  const url = `${baseUrl}/ctrl?dev=${encodeURIComponent(dev)}&st=${st ? '1' : '0'}&force=1${extraParams}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -425,6 +432,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSystemModeState(modeDev.status);
     }
 
+    // Cloud Timetable Sync: Load timetable saved in dev-system-mode settings
+    if (modeDev && modeDev.settings && typeof modeDev.settings === 'object') {
+      const cloudTt = (modeDev.settings as Record<string, unknown>).timetable as TimetableConfig | undefined;
+      if (cloudTt && Array.isArray(cloudTt.periods) && cloudTt.periods.length > 0) {
+        setTimetable(cloudTt);
+        void AsyncStorage.setItem(STORAGE_KEYS.TIMETABLE, JSON.stringify(cloudTt));
+      } else {
+        // Seed default timetable into Supabase so cloud and ESP32 have a shared copy
+        void supabase.from('devices').update({
+          settings: {
+            ...((modeDev.settings as Record<string, unknown>) || {}),
+            timetable: defaultTimetable,
+          },
+          last_updated: new Date().toISOString(),
+        }).eq('id', 'dev-system-mode');
+      }
+    }
+
     // Auto-seed missing display devices into Supabase if needed
     const missingDevs = [
       ...devsA101.filter(d => 
@@ -678,6 +703,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   setSystemModeState(newRecord.status);
                 }
               }
+              // Real-time Timetable synchronization across devices
+              if (newRecord.settings && typeof newRecord.settings === 'object') {
+                const cloudTt = (newRecord.settings as Record<string, unknown>).timetable as TimetableConfig | undefined;
+                if (cloudTt && Array.isArray(cloudTt.periods) && cloudTt.periods.length > 0) {
+                  setTimetable(cloudTt);
+                  void AsyncStorage.setItem(STORAGE_KEYS.TIMETABLE, JSON.stringify(cloudTt));
+                }
+              }
               return;
             }
 
@@ -705,6 +738,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 const isOn = newRecord.status === 'on';
                 return {
                   ...dev,
+                  ...newSettings,
                   status: newRecord.status as DeviceStatus,
                   ratedPower: rated,
                   powerUsage: isOn ? rated : 0,
@@ -742,6 +776,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 occupancy: (newRecord.occupancy_status as 'occupied' | 'vacant') || cls.occupancy,
                 temperature: typeof newRecord.temperature === 'number' ? newRecord.temperature : cls.temperature,
                 humidity: typeof newRecord.humidity === 'number' ? newRecord.humidity : cls.humidity,
+                energyToday: typeof newRecord.energy_today === 'number' ? newRecord.energy_today : cls.energyToday,
+                estimatedCost: typeof newRecord.estimated_cost === 'number' ? newRecord.estimated_cost : cls.estimatedCost,
                 currentLoad: hasPhysicalSensor
                   ? (typeof newRecord.current_load === 'number' ? newRecord.current_load : cls.currentLoad)
                   : activeDeviceLoad,
@@ -1145,7 +1181,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const [ctrlRes, devRes, clsRes] = await Promise.all([
             supabase.from('controllers').select('status, ip_address').eq('id', 'ctrl-esp32').single(),
             supabase.from('devices').select('id, classroom_id, status, power_usage, settings, energy_today, last_updated'),
-            supabase.from('classrooms').select('id, temperature, humidity, occupancy_status, current_load, status'),
+            supabase.from('classrooms').select('id, temperature, humidity, occupancy_status, current_load, energy_today, estimated_cost, status'),
           ]);
 
           if (ctrlRes.data && ctrlRes.data.status === 'online') {
@@ -1189,6 +1225,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 const isOn = cloudDev.status === 'on';
                 return {
                   ...dev,
+                  ...cloudSettings,
                   status: cloudDev.status as DeviceStatus,
                   ratedPower: rated,
                   powerUsage: isOn ? rated : 0,
@@ -1220,6 +1257,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 occupancy: (cloudCls.occupancy_status as 'occupied' | 'vacant') || cls.occupancy,
                 temperature: typeof cloudCls.temperature === 'number' ? cloudCls.temperature : cls.temperature,
                 humidity: typeof (cloudCls as any).humidity === 'number' ? (cloudCls as any).humidity : cls.humidity,
+                energyToday: typeof cloudCls.energy_today === 'number' ? cloudCls.energy_today : cls.energyToday,
+                estimatedCost: typeof cloudCls.estimated_cost === 'number' ? cloudCls.estimated_cost : cls.estimatedCost,
                 currentLoad: hasPhysicalSensor
                   ? (typeof cloudCls.current_load === 'number' ? cloudCls.current_load : cls.currentLoad)
                   : activeDeviceLoad,
@@ -1313,17 +1352,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    let extraParams = '';
+    if (devCode === 'rgb') {
+      const col = targetDev.color || '#FF6B00';
+      const bri = targetDev.brightness ?? 80;
+      const mod = targetDev.rgbMode || 'solid';
+      extraParams = `&color=${encodeURIComponent(col)}&b=${bri}&mode=${encodeURIComponent(mod)}`;
+    }
+
     candidateIps.forEach(ip => {
-      void sendEsp32Command(ip, devCode, nextState);
+      void sendEsp32Command(ip, devCode, nextState, 3500, extraParams);
     });
 
     // 2. Optimistic local React state update (Instant 0ms UI response)
+    const autoOffStartedAt = newStatus === 'on' && targetDev.schedule?.autoOffEnabled ? new Date().toISOString() : null;
+
     setClassrooms(prev => prev.map(cls => {
       if (cls.id !== classroomId) return cls;
       const updatedDevices = cls.devices.map(dev => {
         if (dev.id !== deviceId) return dev;
         const sched = dev.schedule;
-        const autoOffStartedAt = newStatus === 'on' && sched?.autoOffEnabled ? new Date().toISOString() : null;
         return {
           ...dev,
           status: newStatus,
@@ -1346,9 +1394,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
     }));
 
-    // 3. Asynchronous cloud persistence in background - preserve ratedPower in settings!
+    // 3. Asynchronous cloud persistence in background - preserve ratedPower & schedule in settings!
     const existingSettings = deviceSettings(targetDev);
     existingSettings.ratedPower = rated;
+    if (targetDev.schedule) {
+      existingSettings.schedule = {
+        ...targetDev.schedule,
+        autoOffStartedAt,
+      };
+    }
     void syncDevices([{ 
       id: deviceId, 
       data: { 
@@ -1388,19 +1442,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const targetSettings = settings;
     if (targetSettings) {
       const isDiscrete = updates.rgbMode !== undefined || updates.status !== undefined;
+      const syncData: Record<string, unknown> = { settings: targetSettings };
+      if (updates.status !== undefined) syncData.status = updates.status;
+      if (updates.powerUsage !== undefined) syncData.power_usage = updates.powerUsage;
+
       if (isDiscrete) {
         if (debouncedSyncTimeoutRef.current[deviceId]) {
           clearTimeout(debouncedSyncTimeoutRef.current[deviceId]);
           delete debouncedSyncTimeoutRef.current[deviceId];
         }
-        void syncDevices([{ id: deviceId, data: { settings: targetSettings } }]);
+        void syncDevices([{ id: deviceId, data: syncData }]);
       } else {
         if (debouncedSyncTimeoutRef.current[deviceId]) {
           clearTimeout(debouncedSyncTimeoutRef.current[deviceId]);
         }
-        const stCopy = Object.assign({}, targetSettings);
+        const syncCopy = Object.assign({}, syncData);
         debouncedSyncTimeoutRef.current[deviceId] = setTimeout(() => {
-          void syncDevices([{ id: deviceId, data: { settings: stCopy } }]);
+          void syncDevices([{ id: deviceId, data: syncCopy }]);
           delete debouncedSyncTimeoutRef.current[deviceId];
         }, 300);
       }
@@ -2126,7 +2184,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTimetable(newConfig);
     await AsyncStorage.setItem(STORAGE_KEYS.TIMETABLE, JSON.stringify(newConfig)).catch(console.error);
 
-    // Send timetable to ESP32 for autonomous clock triggers
+    // 1. CLOUD SYNC: Persist Timetable to Supabase dev-system-mode settings
+    // This guarantees the schedule is shared across all devices and pulled by ESP32 globally!
+    if (isSupabaseConfigured) {
+      try {
+        const { data: modeRow } = await supabase
+          .from('devices')
+          .select('settings')
+          .eq('id', 'dev-system-mode')
+          .single();
+        const existingSettings = (modeRow?.settings as Record<string, unknown>) || {};
+        const { error: ttErr } = await supabase
+          .from('devices')
+          .update({
+            settings: {
+              ...existingSettings,
+              timetable: newConfig,
+            },
+            last_updated: new Date().toISOString(),
+          })
+          .eq('id', 'dev-system-mode');
+        if (ttErr) {
+          console.warn('[TIMETABLE] Supabase sync error:', ttErr.message);
+        }
+      } catch (err) {
+        console.warn('[TIMETABLE] Cloud timetable save exception:', err);
+      }
+    }
+
+    // 2. Direct LAN sync to ESP32 for immediate instant update if on local Wi-Fi
     const candidateIps = new Set<string>();
     if (esp32Ip && esp32Ip.trim()) candidateIps.add(esp32Ip.trim());
     for (const c of classrooms) {
@@ -2152,9 +2238,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [classrooms, esp32Ip, showToast]);
 
   const triggerBellTest = useCallback(async (pattern: BellPattern = 'college-bell') => {
-    // Play local audio chime preview if available (e.g. web browser / dev preview)
+    // 1. Haptic vibration feedback on the phone
+    try {
+      Vibration.vibrate([0, 150, 100, 150]);
+    } catch {}
+
+    // 2. Play local audio chime preview if available (e.g. web browser / dev preview)
     const webAudioPlayed = playChimeWebAudio(pattern);
 
+    // 3. Concurrently attempt direct local LAN trigger if candidate IPs exist
     const candidateIps = new Set<string>();
     if (esp32Ip && esp32Ip.trim()) candidateIps.add(esp32Ip.trim());
     for (const c of classrooms) {
@@ -2163,41 +2255,69 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    if (candidateIps.size === 0) {
-      if (webAudioPlayed) {
-        showToast(`Period Bell (${pattern}) Preview Played`, 'info');
-        return { success: true, message: 'Audio preview played' };
-      }
-      return { success: false, message: 'ESP32 Controller offline or IP not configured' };
+    let lanSuccess = false;
+    if (candidateIps.size > 0) {
+      const lanPromises = Array.from(candidateIps).map(async (ip) => {
+        try {
+          const cleanIp = ip.trim();
+          const baseUrl = cleanIp.startsWith('http') ? cleanIp : `http://${cleanIp}`;
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 1200);
+          const res = await fetch(`${baseUrl}/api/bell?pattern=${encodeURIComponent(pattern)}`, {
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+          if (res.ok) lanSuccess = true;
+        } catch {}
+      });
+      await Promise.allSettled(lanPromises);
     }
 
-    let success = false;
-    for (const ip of candidateIps) {
+    // If local LAN succeeded (same Wi-Fi), the bell has already chimed!
+    // Skip cloud dispatch to prevent playing the chime twice!
+    if (lanSuccess) {
+      showToast(`Classroom Bell (${pattern}) Chimed (Local LAN)!`, 'success');
+      return { success: true, message: 'Bell chimed via local network' };
+    }
+
+    // 4. If LAN failed or phone is on Mobile Data / Remote Network, dispatch via Supabase Cloud!
+    if (isSupabaseConfigured) {
       try {
-        const cleanIp = ip.trim();
-        const baseUrl = cleanIp.startsWith('http') ? cleanIp : `http://${cleanIp}`;
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 2500);
-        const res = await fetch(`${baseUrl}/api/bell?pattern=${encodeURIComponent(pattern)}`, {
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
-        if (res.ok) {
-          success = true;
-          break;
+        const { data: modeRow } = await supabase
+          .from('devices')
+          .select('settings')
+          .eq('id', 'dev-system-mode')
+          .single();
+        const existingSettings = (modeRow?.settings as Record<string, unknown>) || {};
+        const { error: bellErr } = await supabase
+          .from('devices')
+          .update({
+            settings: {
+              ...existingSettings,
+              bell_trigger: {
+                pattern,
+                timestamp: Date.now(),
+                ts: String(Date.now()),
+              },
+            },
+            last_updated: new Date().toISOString(),
+          })
+          .eq('id', 'dev-system-mode');
+
+        if (!bellErr) {
+          showToast(`Classroom Bell (${pattern}) Chimed via Cloud!`, 'success');
+          return { success: true, message: 'Bell chimed via cloud' };
         }
-      } catch {}
+      } catch (e) {
+        console.warn('[BELL] Cloud bell dispatch error:', e);
+      }
     }
 
-    if (success) {
-      showToast(`Period Bell (${pattern}) Chimed!`, 'success');
-      return { success: true, message: 'Bell chimed successfully' };
-    }
     if (webAudioPlayed) {
       showToast(`Period Bell (${pattern}) Preview Played (ESP32 Offline)`, 'info');
       return { success: true, message: 'Audio preview played' };
     }
-    return { success: false, message: 'Could not reach ESP32 to test bell' };
+    return { success: false, message: 'Could not reach ESP32 or Cloud to test bell' };
   }, [classrooms, esp32Ip, showToast]);
 
   const loginUser = useCallback(async (identifier: string, pass: string): Promise<{ success: boolean; message: string; user?: User }> => {

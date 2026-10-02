@@ -8,10 +8,12 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   ScrollView,
-  KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Keyboard,
+  Dimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
 import { NoticeDuration } from '../types';
@@ -33,14 +35,35 @@ export function NoticeModal({
 }: NoticeModalProps) {
   const { addNotice, classrooms } = useApp();
   const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const [targetId, setTargetId] = useState<string>(defaultClassroomId);
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [duration, setDuration] = useState<NoticeDuration>('24h');
   const [submitting, setSubmitting] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const styles = React.useMemo(() => getStyles(colors, isDark), [colors, isDark]);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      }
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        setKeyboardHeight(0);
+      }
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -102,21 +125,34 @@ export function NoticeModal({
     }
   };
 
+  const windowHeight = Dimensions.get('window').height;
+  const dynamicMaxHeight = keyboardHeight > 0
+    ? Math.max(260, windowHeight - insets.top - keyboardHeight - 16)
+    : (Platform.OS === 'android' ? '92%' : '88%');
+
   return (
     <Modal
       visible={visible}
       transparent
       animationType="slide"
       onRequestClose={onClose}
+      statusBarTranslucent
     >
-      <KeyboardAvoidingView
-        style={styles.modalOverlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <View style={styles.modalOverlay}>
         <TouchableWithoutFeedback onPress={onClose}>
-          <View style={styles.backdropDismiss} />
+          <View style={StyleSheet.absoluteFill} />
         </TouchableWithoutFeedback>
-        <View style={styles.modalContainer}>
+
+        <View
+          style={[
+            styles.modalContainer,
+            {
+              marginBottom: keyboardHeight > 0 ? keyboardHeight : 0,
+              paddingBottom: keyboardHeight > 0 ? 12 : Math.max(insets.bottom + 16, 28),
+              maxHeight: dynamicMaxHeight,
+            },
+          ]}
+        >
           {/* Header */}
           <View style={styles.modalHeader}>
             <View style={styles.headerTitleRow}>
@@ -133,7 +169,13 @@ export function NoticeModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            style={{ flexShrink: 1 }}
+          >
             {/* Target Classroom Selection */}
             <Text style={styles.inputLabel}>Target Classroom / Scope</Text>
             <View style={styles.targetPillGroup}>
@@ -261,7 +303,7 @@ export function NoticeModal({
             </TouchableOpacity>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -273,15 +315,11 @@ function getStyles(colors: any, isDark: boolean) {
       backgroundColor: colors.modalOverlay,
       justifyContent: 'flex-end',
     },
-    backdropDismiss: {
-      flex: 1,
-    },
     modalContainer: {
       backgroundColor: colors.card,
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
-      maxHeight: '90%',
-      paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+      width: '100%',
       borderWidth: 1,
       borderColor: colors.surfaceBorder,
     },

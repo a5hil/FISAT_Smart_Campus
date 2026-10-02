@@ -1264,16 +1264,16 @@ export default function DeviceDetailScreen() {
   };
 
   const handleColorChange = (hex: string) => {
-    updateDeviceValue(classroom.id, device.id, { color: hex });
+    updateDeviceValue(classroom.id, device.id, { color: hex, status: 'on' });
   };
 
   const handleBrightnessChange = (val: number) => {
     const clamped = Math.max(10, Math.min(100, Math.round(val)));
-    updateDeviceValue(classroom.id, device.id, { brightness: clamped });
+    updateDeviceValue(classroom.id, device.id, { brightness: clamped, status: 'on' });
   };
 
   const handleModeChange = (mode: string) => {
-    updateDeviceValue(classroom.id, device.id, { rgbMode: mode });
+    updateDeviceValue(classroom.id, device.id, { rgbMode: mode, status: 'on' });
   };
 
   const RGB_PRESETS = [
@@ -1789,7 +1789,18 @@ export default function DeviceDetailScreen() {
                     <TouchableOpacity
                       key={item.minutes}
                       style={[styles.autoOffChip, isCurrent && styles.autoOffChipActive]}
-                      onPress={() => setAutoOffMinutes(item.minutes)}
+                      onPress={() => {
+                        setAutoOffMinutes(item.minutes);
+                        updateDeviceSchedule(classroom.id, device.id, {
+                          enabled: scheduleEnabled,
+                          onTime,
+                          offTime,
+                          days: selectedDays.length > 0 ? selectedDays : [1, 2, 3, 4, 5],
+                          autoOffEnabled: true,
+                          autoOffMinutes: item.minutes,
+                          autoOffStartedAt: device.schedule?.autoOffStartedAt ?? null,
+                        });
+                      }}
                       activeOpacity={0.7}
                     >
                       <Text style={[styles.autoOffChipText, isCurrent && styles.autoOffChipTextActive]}>
