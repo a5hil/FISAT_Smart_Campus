@@ -347,9 +347,15 @@ export function ChromaPanelColorStudio({
     { id: 'solid', name: 'Solid Chroma', icon: 'color-filter-outline', desc: 'Precise static chromatic illumination' },
     { id: 'breathe', name: 'Chroma Pulse', icon: 'pulse-outline', desc: 'Gentle rhythmic ambient breathing glow' },
     { id: 'rainbow', name: 'Full Spectrum Wave', icon: 'sparkles-outline', desc: 'Continuous 360° dynamic color cycle' },
-    { id: 'strobe', name: 'Flash / Strobe', icon: 'flash-outline', desc: 'High visibility strobe beacon' },
-    { id: 'chase', name: 'Color Chase', icon: 'swap-horizontal-outline', desc: 'Sequential flowing light stream' },
+    { id: 'meteor', name: 'Meteor Stream', icon: 'planet-outline', desc: 'Cosmic shooting star with glowing fading tail' },
+    { id: 'cyberpunk', name: 'Cyberpunk Neon', icon: 'infinite-outline', desc: 'Synthwave dual-tone cyan & magenta wave' },
+    { id: 'aurora', name: 'Aurora Borealis', icon: 'leaf-outline', desc: 'Mystical emerald, turquoise & violet curtain' },
+    { id: 'twinkle', name: 'Starry Twinkle', icon: 'star-outline', desc: 'Glistening starry night sky shimmer' },
     { id: 'fire', name: 'Fireplace Flicker', icon: 'flame-outline', desc: 'Natural organic flame warmth' },
+    { id: 'chase', name: 'Color Chase', icon: 'swap-horizontal-outline', desc: 'Sequential flowing light stream' },
+    { id: 'heartbeat', name: 'Cardiac Pulse', icon: 'heart-outline', desc: 'Biometric double-thump rhythmic heartbeat' },
+    { id: 'police', name: 'Emergency Beacon', icon: 'shield-half-outline', desc: 'Split dual red & blue high-speed siren' },
+    { id: 'strobe', name: 'Flash / Strobe', icon: 'flash-outline', desc: 'High visibility strobe beacon' },
   ];
 
   const activeEffectObj = CHROMA_EFFECTS.find(e => e.id === currentMode) || CHROMA_EFFECTS[0];
@@ -1303,9 +1309,10 @@ export default function DeviceDetailScreen() {
   const handleColorChange = (hex: string) => {
     activeColorRef.current = hex;
     setCustomHex(hex);
-    // If the strip is in an animation mode that overrides color (e.g. fireplace flicker or rainbow wave),
+    // If the strip is in an animation mode that overrides color (e.g. fireplace flicker, aurora, or rainbow wave),
     // selecting a specific chromatic hue on the color wheel intelligently switches to 'solid' mode
-    const nextMode = (selectedRgbMode === 'fire' || selectedRgbMode === 'rainbow') ? 'solid' : selectedRgbMode;
+    const dynamicPaletteModes = ['fire', 'rainbow', 'aurora', 'cyberpunk', 'police'];
+    const nextMode = dynamicPaletteModes.includes(selectedRgbMode) ? 'solid' : selectedRgbMode;
     const updates: Partial<typeof device> = { color: hex };
     if (nextMode !== selectedRgbMode) {
       lastUserModeSelectMsRef.current = Date.now();
@@ -1358,6 +1365,14 @@ export default function DeviceDetailScreen() {
     { id: 'solid', label: 'Solid Color', icon: 'color-filter-outline' },
     { id: 'breathe', label: 'Pulse / Breathe', icon: 'pulse-outline' },
     { id: 'rainbow', label: 'Rainbow Wave', icon: 'sparkles-outline' },
+    { id: 'meteor', label: 'Meteor Stream', icon: 'planet-outline' },
+    { id: 'cyberpunk', label: 'Cyberpunk Neon', icon: 'infinite-outline' },
+    { id: 'aurora', label: 'Aurora Borealis', icon: 'leaf-outline' },
+    { id: 'twinkle', label: 'Starry Twinkle', icon: 'star-outline' },
+    { id: 'fire', label: 'Fireplace Flicker', icon: 'flame-outline' },
+    { id: 'chase', label: 'Color Chase', icon: 'swap-horizontal-outline' },
+    { id: 'heartbeat', label: 'Cardiac Pulse', icon: 'heart-outline' },
+    { id: 'police', label: 'Emergency Beacon', icon: 'shield-half-outline' },
     { id: 'strobe', label: 'Flash Alert', icon: 'flash-outline' },
   ];
 

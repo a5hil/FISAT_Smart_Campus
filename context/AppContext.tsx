@@ -264,6 +264,69 @@ function mapActivity(row: ActivityRow): ActivityItem {
   };
 }
 
+export const CANONICAL_DEVICE_ORDER: Record<string, number> = {
+  // Classroom A101 (Classroom 1)
+  'dev-a101-light-1': 1,
+  'dev-a101-fan-1': 2,
+  'dev-a101-curtain': 3,
+  'dev-a101-notice-board': 4,
+  'dev-a101-smart-screen': 5,
+  // Classroom A102 (Classroom 2)
+  'dev-a102-light-1': 1,
+  'dev-a102-fan-1': 2,
+  'dev-a102-curtain': 3,
+  // Corridor Zone
+  'dev-corr-light-1': 1,
+  'dev-corr-light-2': 2,
+  'dev-corr-rgb-strip': 3,
+};
+
+export const CANONICAL_CLASSROOM_ORDER: Record<string, number> = {
+  'cls-a101': 1,
+  'cls-a102': 2,
+  'cls-corridor': 3,
+};
+
+export function sortDevicesDeterministically(devices: Device[]): Device[] {
+  if (!Array.isArray(devices)) return [];
+  return [...devices].sort((a, b) => {
+    const orderA = CANONICAL_DEVICE_ORDER[a.id];
+    const orderB = CANONICAL_DEVICE_ORDER[b.id];
+    if (orderA !== undefined && orderB !== undefined) {
+      return orderA - orderB;
+    }
+    if (orderA !== undefined) return -1;
+    if (orderB !== undefined) return 1;
+
+    // Relay Channel order
+    if (a.relayChannel !== undefined && b.relayChannel !== undefined && a.relayChannel !== b.relayChannel) {
+      return a.relayChannel - b.relayChannel;
+    }
+
+    // Category order fallback
+    const categoryOrder: Record<string, number> = { light: 1, fan: 2, curtain: 3, display: 4, ac: 5 };
+    const catA = categoryOrder[a.category] ?? 99;
+    const catB = categoryOrder[b.category] ?? 99;
+    if (catA !== catB) return catA - catB;
+
+    return (a.name || '').localeCompare(b.name || '');
+  });
+}
+
+export function sortClassroomsDeterministically(rooms: Classroom[]): Classroom[] {
+  if (!Array.isArray(rooms)) return [];
+  return [...rooms].sort((a, b) => {
+    const orderA = CANONICAL_CLASSROOM_ORDER[a.id];
+    const orderB = CANONICAL_CLASSROOM_ORDER[b.id];
+    if (orderA !== undefined && orderB !== undefined) {
+      return orderA - orderB;
+    }
+    if (orderA !== undefined) return -1;
+    if (orderB !== undefined) return 1;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+}
+
 function buildClassrooms(
   classroomRows: ClassroomRow[],
   controllerRows: ControllerRow[],
@@ -318,8 +381,8 @@ function buildClassrooms(
     activityByClass.set(r.classroom_id, list);
   }
 
-  return classroomRows.map((r) => {
-    const devs = devicesByClass.get(r.id) ?? [];
+  const mapped = classroomRows.map((r) => {
+    const devs = sortDevicesDeterministically(devicesByClass.get(r.id) ?? []);
     const activeDevLoad = devs.reduce((sum, d) => sum + (d.status === 'on' ? (d.powerUsage || 0) : 0), 0);
     const initialLoad = r.id === 'cls-a101' ? (r.current_load || activeDevLoad) : activeDevLoad;
     return {
@@ -338,6 +401,8 @@ function buildClassrooms(
       recentActivity: activityByClass.get(r.id) ?? [],
     };
   });
+
+  return sortClassroomsDeterministically(mapped);
 }
 
 /**
@@ -520,9 +585,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured) return false;
     const [campusRes, classroomRes, controllerRes, deviceRes, alertRes, notifRes, activityRes] = await Promise.all([
       supabase.from('campuses').select('*'),
-      supabase.from('classrooms').select('*'),
+      supabase.from('classrooms').select('*').order('name', { ascending: true }),
       supabase.from('controllers').select('*'),
-      supabase.from('devices').select('*'),
+      supabase.from('devices').select('*').order('relay_channel', { ascending: true }),
       supabase.from('alerts').select('*'),
       supabase.from('notifications').select('*'),
       supabase.from('activity').select('*'),
@@ -751,7 +816,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 ? parsed.filter((c: any) => c.id === 'cls-a101' || c.id === 'cls-a102' || c.id === 'cls-corridor')
                 : [];
               if (valid.length === 3) {
-                setClassrooms(valid);
+                const normalized = sortClassroomsDeterministically(valid.map((c: any) => ({
+                  ...c,
+                  devices: sortDevicesDeterministically(c.devices || []),
+                })));
+                setClassrooms(normalized);
               } else {
                 setClassrooms(mockClassrooms);
                 void AsyncStorage.setItem(STORAGE_KEYS.CLASSROOMS, JSON.stringify(mockClassrooms));

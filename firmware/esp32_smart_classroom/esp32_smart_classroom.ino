@@ -653,7 +653,7 @@ volatile bool state_ws2812 = false;
 volatile bool ws2812_needs_update = false;
 String ws2812_color = WS2812_DEFAULT_COLOR;
 int ws2812_brightness = WS2812_DEFAULT_BRIGHTNESS; // 0-255
-String ws2812_mode = "solid";                      // "solid", "breathe", "rainbow", "strobe"
+String ws2812_mode = "solid";                      // "solid", "breathe", "rainbow", "strobe", "chase", "fire", "meteor", "police", "aurora", "twinkle", "heartbeat", "cyberpunk"
 unsigned long last_ws2812_anim_ms = 0;
 uint16_t ws2812_anim_step = 0;
 bool ws2812_strobe_state = false;
@@ -1369,7 +1369,7 @@ void updateWs2812Strip() {
   Serial.printf("[WS2812] Strip turned ON | Pin: GPIO %d | LEDs: %d | Mode: %s | Color: %s | Brightness: %d\n",
                 WS2812_PIN, WS2812_NUM_LEDS, ws2812_mode.c_str(), ws2812_color.c_str(), ws2812_brightness);
 
-  if (ws2812_mode == "rainbow" || ws2812_mode == "breathe" || ws2812_mode == "strobe" || ws2812_mode == "chase" || ws2812_mode == "fire") {
+  if (ws2812_mode != "solid" && ws2812_mode != "") {
     // Handled dynamically in updateWs2812Animation()
     last_ws2812_anim_ms = 0;
     return;
@@ -1477,6 +1477,103 @@ void updateWs2812Animation() {
         int g1 = constrain(90 - flicker, 0, 255);
         int b1 = constrain(10 - (flicker / 2), 0, 255);
         strip.setPixelColor(i, strip.Color(r1, g1, b1));
+      }
+      strip.show();
+    }
+  } else if (ws2812_mode == "meteor") {
+    if (now - last_ws2812_anim_ms >= 45) {
+      last_ws2812_anim_ms = now;
+      for (int i = 0; i < WS2812_NUM_LEDS; i++) {
+        uint32_t col = strip.getPixelColor(i);
+        uint8_t r = (uint8_t)(((col >> 16) & 0xFF) * 0.60f);
+        uint8_t g = (uint8_t)(((col >> 8) & 0xFF) * 0.60f);
+        uint8_t b = (uint8_t)((col & 0xFF) * 0.60f);
+        strip.setPixelColor(i, strip.Color(r, g, b));
+      }
+      ws2812_anim_step = (ws2812_anim_step + 1) % (WS2812_NUM_LEDS + 4);
+      if (ws2812_anim_step < WS2812_NUM_LEDS) {
+        uint32_t c = parseHexColor(ws2812_color);
+        strip.setPixelColor(ws2812_anim_step, c);
+      }
+      strip.show();
+    }
+  } else if (ws2812_mode == "police") {
+    if (now - last_ws2812_anim_ms >= 55) {
+      last_ws2812_anim_ms = now;
+      ws2812_anim_step = (ws2812_anim_step + 1) % 14;
+      strip.clear();
+      int half = WS2812_NUM_LEDS / 2;
+      if (ws2812_anim_step == 0 || ws2812_anim_step == 2 || ws2812_anim_step == 4) {
+        for (int i = 0; i < half; i++) strip.setPixelColor(i, strip.Color(255, 0, 0));
+      } else if (ws2812_anim_step == 7 || ws2812_anim_step == 9 || ws2812_anim_step == 11) {
+        for (int i = half; i < WS2812_NUM_LEDS; i++) strip.setPixelColor(i, strip.Color(0, 50, 255));
+      }
+      strip.show();
+    }
+  } else if (ws2812_mode == "aurora") {
+    if (now - last_ws2812_anim_ms >= 35) {
+      last_ws2812_anim_ms = now;
+      ws2812_anim_step = (ws2812_anim_step + 2) % 360;
+      for (int i = 0; i < WS2812_NUM_LEDS; i++) {
+        float angle = (ws2812_anim_step + i * 24) * (3.14159265f / 180.0f);
+        float s = (sin(angle) + 1.0f) * 0.5f;
+        float c = (cos(angle * 0.7f) + 1.0f) * 0.5f;
+        uint8_t r = (uint8_t)(70.0f * (1.0f - s));
+        uint8_t g = (uint8_t)(230.0f * s + 25.0f * c);
+        uint8_t b = (uint8_t)(160.0f * (1.0f - c) + 240.0f * c);
+        strip.setPixelColor(i, strip.Color(r, g, b));
+      }
+      strip.show();
+    }
+  } else if (ws2812_mode == "twinkle") {
+    if (now - last_ws2812_anim_ms >= 60) {
+      last_ws2812_anim_ms = now;
+      uint32_t baseColor = parseHexColor(ws2812_color);
+      uint8_t br = ((baseColor >> 16) & 0xFF) / 8;
+      uint8_t bg = ((baseColor >> 8) & 0xFF) / 8;
+      uint8_t bb = (baseColor & 0xFF) / 8;
+      for (int i = 0; i < WS2812_NUM_LEDS; i++) {
+        strip.setPixelColor(i, strip.Color(br, bg, bb));
+      }
+      int numStars = random(1, 3);
+      for (int s = 0; s < numStars; s++) {
+        int idx = random(0, WS2812_NUM_LEDS);
+        strip.setPixelColor(idx, strip.Color(255, 255, 240));
+      }
+      strip.show();
+    }
+  } else if (ws2812_mode == "heartbeat") {
+    if (now - last_ws2812_anim_ms >= 20) {
+      last_ws2812_anim_ms = now;
+      ws2812_anim_step = (ws2812_anim_step + 1) % 65;
+      float factor = 0.05f;
+      if (ws2812_anim_step >= 0 && ws2812_anim_step <= 8) {
+        factor = 0.1f + 0.9f * sin((ws2812_anim_step / 8.0f) * 3.14159f);
+      } else if (ws2812_anim_step >= 12 && ws2812_anim_step <= 20) {
+        factor = 0.1f + 0.7f * sin(((ws2812_anim_step - 12) / 8.0f) * 3.14159f);
+      }
+      uint32_t baseColor = parseHexColor(ws2812_color);
+      uint8_t r = (uint8_t)(((baseColor >> 16) & 0xFF) * factor);
+      uint8_t g = (uint8_t)(((baseColor >> 8) & 0xFF) * factor);
+      uint8_t b = (uint8_t)((baseColor & 0xFF) * factor);
+      uint32_t c = strip.Color(r, g, b);
+      for (int i = 0; i < WS2812_NUM_LEDS; i++) {
+        strip.setPixelColor(i, c);
+      }
+      strip.show();
+    }
+  } else if (ws2812_mode == "cyberpunk") {
+    if (now - last_ws2812_anim_ms >= 30) {
+      last_ws2812_anim_ms = now;
+      ws2812_anim_step = (ws2812_anim_step + 1) % 120;
+      float pos = (sin(ws2812_anim_step * (3.14159265f / 60.0f)) + 1.0f) * 0.5f * (WS2812_NUM_LEDS - 1);
+      for (int i = 0; i < WS2812_NUM_LEDS; i++) {
+        float dist = fabs((float)i - pos);
+        float ratio = constrain(1.0f - (dist / (WS2812_NUM_LEDS * 0.5f)), 0.0f, 1.0f);
+        uint8_t r = (uint8_t)(255.0f * ratio);
+        uint8_t g = (uint8_t)(229.0f * (1.0f - ratio));
+        uint8_t b = (uint8_t)(255.0f);
+        strip.setPixelColor(i, strip.Color(r, g, b));
       }
       strip.show();
     }

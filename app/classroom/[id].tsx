@@ -7,7 +7,7 @@ import { ScreenHeader } from '../../components/ScreenHeader';
 import { DeviceCard } from '../../components/DeviceCard';
 import { NoticeBoardCard } from '../../components/NoticeBoardCard';
 import { FloatingBottomNav } from '../../components/FloatingBottomNav';
-import { useApp, useTheme } from '../../context/AppContext';
+import { useApp, useTheme, sortDevicesDeterministically } from '../../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 import { triggerHaptic } from '../../utils/haptics';
 
@@ -204,7 +204,7 @@ export default function ClassroomDetailScreen() {
         </View>
 
         <View style={styles.deviceGrid}>
-          {classroom.devices.map(device => (
+          {sortDevicesDeterministically(classroom.devices || []).map(device => (
             <DeviceCard 
               key={device.id} 
               device={device}
