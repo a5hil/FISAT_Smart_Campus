@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import { useApp } from '../context/AppContext';
+import { triggerHaptic } from '../utils/haptics';
 
 interface DeviceCardProps {
   device: Device;
@@ -28,6 +29,7 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
   );
 
   const navigateToDetails = () => {
+    triggerHaptic.light();
     router.push({ 
       pathname: '/device/[id]', 
       params: { id: device.id, classroomId: targetClassroomId } 
@@ -36,6 +38,7 @@ export function DeviceCard({ device, classroomId, onToggle }: DeviceCardProps) {
 
   const handleTilePress = () => {
     if (!isOffline) {
+      triggerHaptic.medium();
       onToggle();
     }
   };

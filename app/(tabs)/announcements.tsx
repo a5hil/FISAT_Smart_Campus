@@ -15,6 +15,7 @@ import { NoticeModal } from '../../components/NoticeModal';
 import { useApp, useTheme } from '../../context/AppContext';
 import { NoticeItem } from '../../types';
 import { Ionicons } from '@expo/vector-icons';
+import { triggerHaptic } from '../../utils/haptics';
 
 type ScopeFilter = 'All' | 'Broadcast' | 'A101' | 'A102';
 
@@ -36,11 +37,13 @@ export default function AnnouncementsScreen() {
   });
 
   const handleDelete = (id: string, title: string) => {
+    triggerHaptic.medium();
     if (Platform.OS === 'web') {
       const confirmed = typeof window !== 'undefined'
         ? window.confirm(`Are you sure you want to remove "${title}" from the digital notice board?`)
         : true;
       if (confirmed) {
+        triggerHaptic.heavy();
         void deleteNotice(id);
       }
       return;
@@ -55,6 +58,7 @@ export default function AnnouncementsScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
+            triggerHaptic.heavy();
             void deleteNotice(id);
           },
         },
@@ -73,6 +77,7 @@ export default function AnnouncementsScreen() {
   };
 
   const openNewModal = (target: 'all' | 'cls-a101' | 'cls-a102' = 'all') => {
+    triggerHaptic.light();
     setDefaultTarget(target);
     setModalVisible(true);
   };
@@ -149,7 +154,10 @@ export default function AnnouncementsScreen() {
               <TouchableOpacity
                 key={f}
                 style={[styles.filterPill, isSelected && styles.filterPillActive]}
-                onPress={() => setActiveFilter(f)}
+                onPress={() => {
+                  triggerHaptic.selection();
+                  setActiveFilter(f);
+                }}
                 activeOpacity={0.7}
               >
                 <Text style={[styles.filterPillText, isSelected && styles.filterPillTextActive]}>

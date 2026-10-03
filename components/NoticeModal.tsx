@@ -19,6 +19,7 @@ import { Layout } from '../constants/layout';
 import { NoticeDuration } from '../types';
 import { useApp, useTheme } from '../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
+import { triggerHaptic } from '../utils/haptics';
 
 interface NoticeModalProps {
   visible: boolean;
@@ -117,9 +118,10 @@ export function NoticeModal({
         postedBy: 'Admin',
       });
 
+      triggerHaptic.success();
       onClose();
     } catch {
-      // Handled in context
+      triggerHaptic.error();
     } finally {
       setSubmitting(false);
     }
@@ -185,7 +187,10 @@ export function NoticeModal({
                   <TouchableOpacity
                     key={opt.id}
                     style={[styles.targetPill, isSelected && styles.targetPillActive]}
-                    onPress={() => setTargetId(opt.id)}
+                    onPress={() => {
+                      triggerHaptic.selection();
+                      setTargetId(opt.id);
+                    }}
                   >
                     <Ionicons
                       name={opt.id === 'all' ? 'megaphone' : 'business'}
@@ -236,7 +241,10 @@ export function NoticeModal({
             <View style={styles.durationRow}>
               <TouchableOpacity
                 style={[styles.durationPill, duration === '1h' && styles.durationPillActive]}
-                onPress={() => setDuration('1h')}
+                onPress={() => {
+                  triggerHaptic.selection();
+                  setDuration('1h');
+                }}
               >
                 <Ionicons
                   name="time-outline"
@@ -251,7 +259,10 @@ export function NoticeModal({
 
               <TouchableOpacity
                 style={[styles.durationPill, duration === '24h' && styles.durationPillActive]}
-                onPress={() => setDuration('24h')}
+                onPress={() => {
+                  triggerHaptic.selection();
+                  setDuration('24h');
+                }}
               >
                 <Ionicons
                   name="calendar-outline"
@@ -266,7 +277,10 @@ export function NoticeModal({
 
               <TouchableOpacity
                 style={[styles.durationPill, duration === 'never' && styles.durationPillActive]}
-                onPress={() => setDuration('never')}
+                onPress={() => {
+                  triggerHaptic.selection();
+                  setDuration('never');
+                }}
               >
                 <Ionicons
                   name="pin-outline"
@@ -283,7 +297,14 @@ export function NoticeModal({
 
           {/* Action Buttons */}
           <View style={styles.modalFooter}>
-            <TouchableOpacity style={styles.cancelButton} onPress={onClose} disabled={submitting}>
+            <TouchableOpacity 
+              style={styles.cancelButton} 
+              onPress={() => {
+                triggerHaptic.light();
+                onClose();
+              }} 
+              disabled={submitting}
+            >
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
 

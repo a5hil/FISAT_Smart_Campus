@@ -16,6 +16,7 @@ import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../context/AppContext';
+import { triggerHaptic } from '../utils/haptics';
 
 export default function SignInScreen() {
   const router = useRouter();
@@ -34,10 +35,12 @@ export default function SignInScreen() {
     const cleanPass = password.trim();
 
     if (!cleanId) {
+      triggerHaptic.warning();
       setErrorMessage('Please enter your username or email address.');
       return;
     }
     if (!cleanPass) {
+      triggerHaptic.warning();
       setErrorMessage('Please enter your password.');
       return;
     }
@@ -46,11 +49,14 @@ export default function SignInScreen() {
     try {
       const res = await loginUser(cleanId, cleanPass);
       if (res.success) {
+        triggerHaptic.success();
         router.replace('/(tabs)' as any);
       } else {
+        triggerHaptic.error();
         setErrorMessage(res.message || 'Invalid username or password.');
       }
     } catch (err: any) {
+      triggerHaptic.error();
       setErrorMessage(err?.message || 'Unable to connect to database. Please check connection.');
     } finally {
       setIsLoading(false);
@@ -58,6 +64,7 @@ export default function SignInScreen() {
   };
 
   const handleQuickFill = (user: string, pass: string) => {
+    triggerHaptic.selection();
     setIdentifier(user);
     setPassword(pass);
     setErrorMessage('');
@@ -163,7 +170,10 @@ export default function SignInScreen() {
           />
           <TouchableOpacity
             style={styles.eyeButton}
-            onPress={() => setShowPassword(!showPassword)}
+            onPress={() => {
+              triggerHaptic.light();
+              setShowPassword(!showPassword);
+            }}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Ionicons
@@ -178,7 +188,10 @@ export default function SignInScreen() {
         <TouchableOpacity
           activeOpacity={0.7}
           style={styles.forgotPassword}
-          onPress={() => router.push('/forget-password' as any)}
+          onPress={() => {
+            triggerHaptic.light();
+            router.push('/forget-password' as any);
+          }}
         >
           <Text style={styles.forgotPasswordText}>Forgot password?</Text>
         </TouchableOpacity>

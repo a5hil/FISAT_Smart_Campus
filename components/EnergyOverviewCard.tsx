@@ -5,6 +5,7 @@ import { Layout } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../context/AppContext';
 import { useRouter } from 'expo-router';
+import { triggerHaptic } from '../utils/haptics';
 
 export function EnergyOverviewCard() {
   const { classrooms, colors, isDark } = useApp();
@@ -28,7 +29,10 @@ export function EnergyOverviewCard() {
       <TouchableOpacity 
         style={[styles.mainCard, { backgroundColor: colors.primary }]} 
         activeOpacity={0.8}
-        onPress={() => router.push('/energy')}
+        onPress={() => {
+          triggerHaptic.light();
+          router.push('/energy');
+        }}
       >
         <View style={styles.cardHeader}>
           <View style={[styles.iconContainer, { backgroundColor: isDark ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.2)' }]}>

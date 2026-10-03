@@ -8,6 +8,7 @@ import { ScreenHeader } from '../components/ScreenHeader';
 import { useApp, useTheme } from '../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 import { NotificationItem } from '../types';
+import { triggerHaptic } from '../utils/haptics';
 
 function NotificationCard({ 
   notification, 
@@ -64,7 +65,10 @@ function NotificationCard({
     <TouchableOpacity 
       style={[styles.notifCard, !notification.isRead && styles.notifCardUnread]}
       activeOpacity={0.7}
-      onPress={onPress}
+      onPress={() => {
+        triggerHaptic.light();
+        onPress();
+      }}
     >
       <View style={[styles.notifIcon, { backgroundColor: isDark ? `${iconColor}25` : `${iconColor}18` }]}>
         <Ionicons name={getIcon()} size={20} color={iconColor} />
@@ -88,6 +92,7 @@ function NotificationCard({
         style={styles.dismissBtn} 
         onPress={(e) => {
           e.stopPropagation();
+          triggerHaptic.medium();
           onDismiss();
         }}
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -110,9 +115,11 @@ export default function NotificationsScreen() {
 
   const handleClearAll = () => {
     if (notifications.length === 0) return;
+    triggerHaptic.warning();
 
     if (Platform.OS === 'web') {
       if (typeof window !== 'undefined' && window.confirm('Are you sure you want to clear all notifications?')) {
+        triggerHaptic.heavy();
         clearAllNotifications();
       }
       return;
@@ -122,8 +129,15 @@ export default function NotificationsScreen() {
       'Clear All Notifications',
       'Are you sure you want to remove all notifications? This action cannot be undone.',
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear All', style: 'destructive', onPress: clearAllNotifications },
+        { text: 'Cancel', style: 'cancel', onPress: () => triggerHaptic.light() },
+        { 
+          text: 'Clear All', 
+          style: 'destructive', 
+          onPress: () => {
+            triggerHaptic.heavy();
+            clearAllNotifications();
+          } 
+        },
       ]
     );
   };
@@ -137,7 +151,13 @@ export default function NotificationsScreen() {
           notifications.length > 0 ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
               {unreadCount > 0 && (
-                <TouchableOpacity onPress={markAllNotificationsRead} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <TouchableOpacity 
+                  onPress={() => {
+                    triggerHaptic.light();
+                    markAllNotificationsRead();
+                  }} 
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
                   <Text style={styles.markAllRead}>Mark all read</Text>
                 </TouchableOpacity>
               )}
@@ -182,7 +202,10 @@ export default function NotificationsScreen() {
       <View style={[styles.bottomCenterContainer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
         <TouchableOpacity
           style={styles.circularCloseBtn}
-          onPress={() => router.back()}
+          onPress={() => {
+            triggerHaptic.light();
+            router.back();
+          }}
           activeOpacity={0.8}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >

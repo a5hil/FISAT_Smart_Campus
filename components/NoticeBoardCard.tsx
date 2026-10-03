@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { NoticeModal } from './NoticeModal';
 
 import { useRouter } from 'expo-router';
+import { triggerHaptic } from '../utils/haptics';
 
 interface NoticeBoardCardProps {
   filterClassroomId?: string; // Optional: restrict to a specific classroom + 'all'
@@ -68,11 +69,13 @@ export function NoticeBoardCard({
   const activeNotice: NoticeItem | undefined = filteredNotices[currentIndex];
 
   const handleDelete = (id: string, title: string) => {
+    triggerHaptic.medium();
     if (Platform.OS === 'web') {
       const confirmed = typeof window !== 'undefined'
         ? window.confirm(`Are you sure you want to remove "${title}" from the digital notice board?`)
         : true;
       if (confirmed) {
+        triggerHaptic.heavy();
         void deleteNotice(id);
       }
       return;
@@ -87,6 +90,7 @@ export function NoticeBoardCard({
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
+            triggerHaptic.heavy();
             void deleteNotice(id);
           },
         },
@@ -137,7 +141,10 @@ export function NoticeBoardCard({
         <View style={styles.headerButtonsRow}>
           <TouchableOpacity
             style={styles.viewAllMiniButton}
-            onPress={() => router.push('/announcements')}
+            onPress={() => {
+              triggerHaptic.light();
+              router.push('/announcements');
+            }}
             activeOpacity={0.7}
           >
             <Text style={styles.viewAllMiniText}>View All</Text>
@@ -146,7 +153,10 @@ export function NoticeBoardCard({
 
           <TouchableOpacity
             style={styles.newNoticeButton}
-            onPress={() => setModalVisible(true)}
+            onPress={() => {
+              triggerHaptic.light();
+              setModalVisible(true);
+            }}
             activeOpacity={0.8}
           >
             <Ionicons name="add" size={15} color={isDark ? '#000000' : '#FFFFFF'} />
@@ -198,7 +208,10 @@ export function NoticeBoardCard({
           <TouchableOpacity
             style={styles.textContainer}
             activeOpacity={0.85}
-            onPress={() => router.push('/announcements')}
+            onPress={() => {
+              triggerHaptic.light();
+              router.push('/announcements');
+            }}
           >
             <Text style={styles.noticeTitle} numberOfLines={1} ellipsizeMode="tail">
               {activeNotice.title}
@@ -223,7 +236,10 @@ export function NoticeBoardCard({
                   {filteredNotices.map((_, idx) => (
                     <TouchableOpacity
                       key={idx}
-                      onPress={() => setCurrentIndex(idx)}
+                      onPress={() => {
+                        triggerHaptic.selection();
+                        setCurrentIndex(idx);
+                      }}
                       hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
                       style={[
                         styles.dot,

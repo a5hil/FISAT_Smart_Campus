@@ -4,6 +4,7 @@ import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
 import { useApp } from '../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
+import { triggerHaptic } from '../utils/haptics';
 
 export function Esp32LiveBar() {
   const { 
@@ -30,8 +31,10 @@ export function Esp32LiveBar() {
     const ok = await syncWithEsp32();
     setSyncing(false);
     if (ok) {
+      triggerHaptic.success();
       showToast('Synced with ESP32 successfully', 'success');
     } else {
+      triggerHaptic.warning();
       showToast(`ESP32 at ${esp32Ip} not responding`, 'error');
     }
   };
@@ -44,8 +47,10 @@ export function Esp32LiveBar() {
     setTesting(false);
     setModalVisible(false);
     if (ok) {
+      triggerHaptic.success();
       showToast('Connected to ESP32!', 'success');
     } else {
+      triggerHaptic.warning();
       showToast('Saved IP, but controller is not responding', 'info');
     }
   };
@@ -81,7 +86,10 @@ export function Esp32LiveBar() {
         <View style={[styles.metricsRow, { backgroundColor: colors.cardSecondary }]}>
           <TouchableOpacity 
             style={[styles.metricItem, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]} 
-            onPress={toggleEsp32Mode}
+            onPress={() => {
+              triggerHaptic.medium();
+              toggleEsp32Mode();
+            }}
             activeOpacity={0.7}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -147,6 +155,7 @@ export function Esp32LiveBar() {
             }
           ]}
           onPress={() => {
+            triggerHaptic.light();
             setInputIp(esp32Ip);
             setModalVisible(true);
           }}
@@ -192,7 +201,10 @@ export function Esp32LiveBar() {
             <View style={styles.modalButtons}>
               <TouchableOpacity 
                 style={[styles.modalCancelBtn, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)' }]}
-                onPress={() => setModalVisible(false)}
+                onPress={() => {
+                  triggerHaptic.light();
+                  setModalVisible(false);
+                }}
               >
                 <Text style={[styles.modalCancelText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>

@@ -17,6 +17,7 @@ import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../context/AppContext';
+import { triggerHaptic } from '../utils/haptics';
 
 export default function SignUpScreen() {
   const router = useRouter();
@@ -36,22 +37,27 @@ export default function SignUpScreen() {
     setErrorMessage('');
 
     if (!fullName.trim()) {
+      triggerHaptic.warning();
       setErrorMessage('Please enter your full name.');
       return;
     }
     if (!username.trim()) {
+      triggerHaptic.warning();
       setErrorMessage('Please choose a username.');
       return;
     }
     if (!email.trim() || !email.includes('@')) {
+      triggerHaptic.warning();
       setErrorMessage('Please enter a valid email address.');
       return;
     }
     if (!password.trim() || password.length < 4) {
+      triggerHaptic.warning();
       setErrorMessage('Password must be at least 4 characters long.');
       return;
     }
     if (password !== confirmPassword) {
+      triggerHaptic.warning();
       setErrorMessage('Passwords do not match.');
       return;
     }
@@ -68,14 +74,23 @@ export default function SignUpScreen() {
       );
 
       if (res.success) {
+        triggerHaptic.success();
         showToast('Account created! Please sign in.', 'success');
         RNAlert.alert('Registration Successful', 'Your account has been added to the database. You can now log in.', [
-          { text: 'Go to Sign In', onPress: () => router.replace('/sign-in' as any) },
+          { 
+            text: 'Go to Sign In', 
+            onPress: () => {
+              triggerHaptic.light();
+              router.replace('/sign-in' as any);
+            }
+          },
         ]);
       } else {
+        triggerHaptic.error();
         setErrorMessage(res.message || 'Registration failed.');
       }
     } catch (err: any) {
+      triggerHaptic.error();
       setErrorMessage(err?.message || 'Failed to register account.');
     } finally {
       setIsLoading(false);
@@ -101,7 +116,10 @@ export default function SignUpScreen() {
         {/* Header */}
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => {
+            triggerHaptic.light();
+            router.back();
+          }}
           activeOpacity={0.7}
         >
           <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
@@ -191,7 +209,10 @@ export default function SignUpScreen() {
           />
           <TouchableOpacity
             style={styles.eyeButton}
-            onPress={() => setShowPassword(!showPassword)}
+            onPress={() => {
+              triggerHaptic.light();
+              setShowPassword(!showPassword);
+            }}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Ionicons
@@ -247,7 +268,13 @@ export default function SignUpScreen() {
         {/* Footer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>Already have an account? </Text>
-          <TouchableOpacity onPress={() => router.push('/sign-in' as any)} activeOpacity={0.7}>
+          <TouchableOpacity 
+            onPress={() => {
+              triggerHaptic.light();
+              router.push('/sign-in' as any);
+            }} 
+            activeOpacity={0.7}
+          >
             <Text style={styles.footerLink}>Sign in</Text>
           </TouchableOpacity>
         </View>

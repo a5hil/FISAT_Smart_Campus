@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-nativ
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
+import { triggerHaptic } from '../utils/haptics';
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
@@ -10,6 +11,7 @@ export default function VerifyEmailScreen() {
   const inputs = useRef<Array<TextInput | null>>([]);
 
   const handleChange = (text: string, index: number) => {
+    if (text) triggerHaptic.selection();
     const newCode = [...code];
     newCode[index] = text;
     setCode(newCode);
@@ -21,6 +23,7 @@ export default function VerifyEmailScreen() {
 
   const handleKeyPress = (e: any, index: number) => {
     if (e.nativeEvent.key === 'Backspace' && !code[index] && index > 0) {
+      triggerHaptic.selection();
       inputs.current[index - 1]?.focus();
     }
   };
@@ -28,7 +31,13 @@ export default function VerifyEmailScreen() {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+      <TouchableOpacity 
+        style={styles.backButton} 
+        onPress={() => {
+          triggerHaptic.light();
+          router.back();
+        }}
+      >
         <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
         <Text style={styles.backText}>Back</Text>
       </TouchableOpacity>
@@ -53,12 +62,21 @@ export default function VerifyEmailScreen() {
       </View>
 
       {/* Resend */}
-      <TouchableOpacity style={styles.resendContainer}>
+      <TouchableOpacity 
+        style={styles.resendContainer}
+        onPress={() => triggerHaptic.light()}
+      >
         <Text style={styles.resendText}>Resend code</Text>
       </TouchableOpacity>
 
       {/* Main Action */}
-      <TouchableOpacity style={styles.mainButton} onPress={() => router.push('/new-password' as any)}>
+      <TouchableOpacity 
+        style={styles.mainButton} 
+        onPress={() => {
+          triggerHaptic.medium();
+          router.push('/new-password' as any);
+        }}
+      >
         <Text style={styles.mainButtonText}>Verify</Text>
       </TouchableOpacity>
     </View>

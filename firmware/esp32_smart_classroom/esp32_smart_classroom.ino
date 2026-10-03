@@ -185,13 +185,18 @@ void queueChimeNotes(const BuzzerNote notes[], int count) {
 
 void playBootChime() {
   // Gentle startup arpeggio (C5 -> E5 -> G5 -> C6)
+  // Played synchronously during setup so the first note never gets stretched by subsequent network/SSL operations
   const BuzzerNote melody[] = {
     { NOTE_C5, 90 },
     { NOTE_E5, 90 },
     { NOTE_G5, 110 },
     { NOTE_C6, 250 }
   };
-  queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
+  for (size_t i = 0; i < sizeof(melody) / sizeof(melody[0]); i++) {
+    setBuzzerFrequency(melody[i].freqHz);
+    delay(melody[i].durationMs);
+  }
+  silenceBuzzer();
   Serial.println(F("[BUZZER] Boot startup chime played"));
 }
 
@@ -3369,6 +3374,7 @@ void setup() {
 
   // 1b. Initialize 3V Audio Alert Buzzer
 #if defined(BUZZER_PIN) && BUZZER_PIN >= 0
+  digitalWrite(BUZZER_PIN, LOW);
   pinMode(BUZZER_PIN, OUTPUT);
   silenceBuzzer();
   Serial.printf("[HARDWARE] 3V Alert Buzzer initialized on GPIO %d (Type: %s)\n", 

@@ -4,6 +4,7 @@ import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../context/AppContext';
+import { triggerHaptic } from '../utils/haptics';
 
 export function QuickControls() {
   const { 
@@ -17,12 +18,20 @@ export function QuickControls() {
   } = useApp();
 
   const handleEmergencyOff = () => {
+    triggerHaptic.heavy();
     RNAlert.alert(
       "Emergency Off",
       "Are you sure you want to turn off all devices and close curtains across both classrooms?",
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Turn Off All", style: "destructive", onPress: emergencyOff }
+        { 
+          text: "Turn Off All", 
+          style: "destructive", 
+          onPress: () => {
+            triggerHaptic.heavy();
+            emergencyOff();
+          } 
+        }
       ]
     );
   };
@@ -47,7 +56,10 @@ export function QuickControls() {
               borderColor: isAuto ? colors.success : colors.primary,
             }
           ]}
-          onPress={toggleEsp32Mode}
+          onPress={() => {
+            triggerHaptic.medium();
+            toggleEsp32Mode();
+          }}
         >
           <Ionicons 
             name={isAuto ? "sparkles" : "hand-left"} 
@@ -68,7 +80,10 @@ export function QuickControls() {
               borderColor: quickControls.allLights ? colors.primary : colors.surfaceBorder,
             }
           ]}
-          onPress={() => toggleQuickControl('allLights')}
+          onPress={() => {
+            triggerHaptic.medium();
+            toggleQuickControl('allLights');
+          }}
         >
           <Ionicons 
             name={quickControls.allLights ? "bulb" : "bulb-outline"} 
@@ -89,7 +104,10 @@ export function QuickControls() {
               borderColor: quickControls.allFans ? colors.primary : colors.surfaceBorder,
             }
           ]}
-          onPress={() => toggleQuickControl('allFans')}
+          onPress={() => {
+            triggerHaptic.medium();
+            toggleQuickControl('allFans');
+          }}
         >
           <Ionicons 
             name="hardware-chip-outline" 
@@ -110,7 +128,10 @@ export function QuickControls() {
               borderColor: quickControls.allCurtains ? colors.primary : colors.surfaceBorder,
             }
           ]}
-          onPress={() => toggleQuickControl('allCurtains')}
+          onPress={() => {
+            triggerHaptic.medium();
+            toggleQuickControl('allCurtains');
+          }}
         >
           <Ionicons 
             name="apps-outline" 

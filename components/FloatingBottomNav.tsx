@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, usePathname } from 'expo-router';
 import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
+import { useApp } from '../context/AppContext';
 
 type NavRoute = {
   key: string;
@@ -42,7 +43,7 @@ const STANDALONE_TABS: { key: string; name: 'index' | 'classrooms' | 'announceme
   { key: 'settings', name: 'settings', label: 'Settings', href: '/(tabs)/settings' },
 ];
 
-import { useApp } from '../context/AppContext';
+import { triggerHaptic } from '../utils/haptics';
 
 export function FloatingBottomNav({ state, descriptors, navigation, activeTab }: FloatingBottomNavProps) {
   const { colors, isDark } = useApp();
@@ -99,6 +100,7 @@ export function FloatingBottomNav({ state, descriptors, navigation, activeTab }:
                 const isFocused = state!.index === index;
 
                 const onPress = () => {
+                  triggerHaptic.light();
                   const event = navigation!.emit({
                     type: 'tabPress',
                     target: route.key,
@@ -145,6 +147,7 @@ export function FloatingBottomNav({ state, descriptors, navigation, activeTab }:
                 const iconName = isFocused ? icons.active : icons.inactive;
 
                 const onPress = () => {
+                  triggerHaptic.light();
                   router.navigate(tab.href as any);
                 };
 

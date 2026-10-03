@@ -9,6 +9,7 @@ import { NoticeBoardCard } from '../../components/NoticeBoardCard';
 import { FloatingBottomNav } from '../../components/FloatingBottomNav';
 import { useApp, useTheme } from '../../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
+import { triggerHaptic } from '../../utils/haptics';
 
 export default function ClassroomDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -56,7 +57,10 @@ export default function ClassroomDetailScreen() {
         rightElement={
           <TouchableOpacity 
             style={styles.iconButton}
-            onPress={() => router.push('/(tabs)/settings')}
+            onPress={() => {
+              triggerHaptic.light();
+              router.push('/(tabs)/settings');
+            }}
           >
             <Ionicons name="settings-outline" size={24} color={colors.text} />
           </TouchableOpacity>

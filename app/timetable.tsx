@@ -12,6 +12,7 @@ import { Layout } from '../constants/layout';
 import { useApp, useTheme } from '../context/AppContext';
 import { TimetableConfig, TimetablePeriod, BellPattern } from '../types';
 import { DrumTimePickerModal } from '../components/DrumTimePickerModal';
+import { triggerHaptic } from '../utils/haptics';
 
 const DAYS = [
   { day: 1, label: 'Mon', full: 'Monday' },
@@ -145,12 +146,14 @@ export default function TimetableScreen() {
   }, [activeConfig]);
 
   const handleToggleMaster = (val: boolean) => {
+    triggerHaptic.medium();
     const updated = { ...activeConfig, enabled: val };
     setActiveConfig(updated);
     void updateTimetable(updated);
   };
 
   const handleToggleDay = (day: number) => {
+    triggerHaptic.selection();
     let days = [...activeConfig.activeDays];
     if (days.includes(day)) {
       if (days.length === 1) {
@@ -168,12 +171,14 @@ export default function TimetableScreen() {
   };
 
   const handleSelectPattern = (pattern: BellPattern) => {
+    triggerHaptic.selection();
     const updated = { ...activeConfig, defaultPattern: pattern };
     setActiveConfig(updated);
     void updateTimetable(updated);
   };
 
   const handleTogglePeriod = (id: string) => {
+    triggerHaptic.medium();
     const updatedPeriods = activeConfig.periods.map(p => p.id === id ? { ...p, enabled: !p.enabled } : p);
     const updated = { ...activeConfig, periods: updatedPeriods };
     setActiveConfig(updated);
@@ -181,6 +186,7 @@ export default function TimetableScreen() {
   };
 
   const handleTestBell = async () => {
+    triggerHaptic.medium();
     setTestingBell(true);
     await triggerBellTest(activeConfig.defaultPattern);
     setTestingBell(false);
@@ -209,6 +215,7 @@ export default function TimetableScreen() {
   }, [activeConfig.periods, selectedDayTab]);
 
   const openAddModal = () => {
+    triggerHaptic.light();
     setEditingPeriodId(null);
     const dayFilteredPeriods = selectedDayTab === 'all'
       ? activeConfig.periods
@@ -224,6 +231,7 @@ export default function TimetableScreen() {
   };
 
   const openEditModal = (p: TimetablePeriod) => {
+    triggerHaptic.light();
     setEditingPeriodId(p.id);
     setPeriodName(p.name);
     setStartTime(p.startTime);
@@ -236,10 +244,12 @@ export default function TimetableScreen() {
 
   const handleSavePeriod = () => {
     if (!periodName.trim()) {
+      triggerHaptic.warning();
       RNAlert.alert('Required', 'Please enter a period title.');
       return;
     }
     if (!startTime.includes(':') || !endTime.includes(':')) {
+      triggerHaptic.warning();
       RNAlert.alert('Invalid Format', 'Please enter time in HH:mm format (e.g. 09:00).');
       return;
     }
@@ -258,10 +268,12 @@ export default function TimetableScreen() {
     const cleanEnd = normalizeTime(endTime);
 
     if (cleanStart >= cleanEnd) {
+      triggerHaptic.warning();
       RNAlert.alert('Invalid Time', 'End time must be later than start time.');
       return;
     }
 
+    triggerHaptic.success();
     const assignedDays = periodDays.length > 0 ? [...periodDays].sort((a, b) => a - b) : undefined;
 
     let updatedPeriods = [...activeConfig.periods];
@@ -299,6 +311,7 @@ export default function TimetableScreen() {
   };
 
   const handleDuplicateToDay = (targetDay: number) => {
+    triggerHaptic.medium();
     const targetLabel = DAYS.find(d => d.day === targetDay)?.full || DAYS.find(d => d.day === targetDay)?.label || `Day ${targetDay}`;
     const basePeriods = activeConfig.periods.filter(p => !p.days || p.days.length === 0 || p.days.includes(1));
     if (basePeriods.length === 0) {
@@ -314,6 +327,7 @@ export default function TimetableScreen() {
         {
           text: 'Copy Schedule',
           onPress: () => {
+            triggerHaptic.success();
             const duplicated: TimetablePeriod[] = basePeriods.map((p, idx) => ({
               ...p,
               id: `p-${Date.now()}-${idx}`,
@@ -337,6 +351,7 @@ export default function TimetableScreen() {
   };
 
   const handleDeletePeriod = (id: string) => {
+    triggerHaptic.medium();
     RNAlert.alert(
       'Delete Period',
       'Are you sure you want to remove this period from the schedule?',
@@ -346,6 +361,7 @@ export default function TimetableScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
+            triggerHaptic.heavy();
             const updatedPeriods = activeConfig.periods.filter(p => p.id !== id);
             const updated = { ...activeConfig, periods: updatedPeriods };
             setActiveConfig(updated);
@@ -369,7 +385,13 @@ export default function TimetableScreen() {
     <View style={styles.container}>
       {/* Screen Header */}
       <View style={[styles.header, { paddingTop: Math.max(insets.top, 16) }]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => {
+            triggerHaptic.light();
+            router.back();
+          }}
+        >
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerTextContainer}>
@@ -464,7 +486,10 @@ export default function TimetableScreen() {
             <View style={styles.defaultToneHeader}>
               <TouchableOpacity
                 style={styles.defaultToneLeft}
-                onPress={() => setDefaultToneModalVisible(true)}
+                onPress={() => {
+                  triggerHaptic.light();
+                  setDefaultToneModalVisible(true);
+                }}
                 activeOpacity={0.75}
               >
                 <View style={styles.defaultToneIconBox}>
@@ -481,7 +506,10 @@ export default function TimetableScreen() {
               <View style={styles.defaultToneRightActions}>
                 <TouchableOpacity
                   style={styles.defaultToneChangePill}
-                  onPress={() => setDefaultToneModalVisible(true)}
+                  onPress={() => {
+                    triggerHaptic.light();
+                    setDefaultToneModalVisible(true);
+                  }}
                   activeOpacity={0.7}
                 >
                   <Text style={styles.defaultToneChangeText}>Change</Text>
@@ -529,7 +557,10 @@ export default function TimetableScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayFilterScroll}>
             <TouchableOpacity
               style={[styles.dayFilterTab, selectedDayTab === 'all' && styles.dayFilterTabActive]}
-              onPress={() => setSelectedDayTab('all')}
+              onPress={() => {
+                triggerHaptic.selection();
+                setSelectedDayTab('all');
+              }}
             >
               <Text style={[styles.dayFilterTabText, selectedDayTab === 'all' && styles.dayFilterTabTextActive]}>
                 All Days
@@ -550,7 +581,10 @@ export default function TimetableScreen() {
                 <TouchableOpacity
                   key={d.day}
                   style={[styles.dayFilterTab, isSelected && styles.dayFilterTabActive]}
-                  onPress={() => setSelectedDayTab(d.day)}
+                  onPress={() => {
+                    triggerHaptic.selection();
+                    setSelectedDayTab(d.day);
+                  }}
                 >
                   {isToday && <View style={[styles.todayDot, isSelected && { backgroundColor: '#FFF' }]} />}
                   <Text style={[styles.dayFilterTabText, isSelected && styles.dayFilterTabTextActive]}>
@@ -668,6 +702,7 @@ export default function TimetableScreen() {
                     <TouchableOpacity
                       style={styles.chimeBadge}
                       onPress={async () => {
+                        triggerHaptic.light();
                         setTestingBell(true);
                         await triggerBellTest(pChime.id);
                         setTestingBell(false);
@@ -727,7 +762,13 @@ export default function TimetableScreen() {
                         Set timings, customized chime & days
                       </Text>
                     </View>
-                    <TouchableOpacity onPress={() => setModalVisible(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        triggerHaptic.light();
+                        setModalVisible(false);
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
                       <Ionicons name="close" size={22} color={colors.text} />
                     </TouchableOpacity>
                   </View>
@@ -746,7 +787,10 @@ export default function TimetableScreen() {
                     <View style={styles.timePickerBoxesRow}>
                       <TouchableOpacity
                         style={styles.timeSetterBox}
-                        onPress={() => setActiveTimePicker('start')}
+                        onPress={() => {
+                          triggerHaptic.light();
+                          setActiveTimePicker('start');
+                        }}
                         activeOpacity={0.75}
                       >
                         <View style={styles.timeSetterBoxHeader}>
@@ -763,7 +807,10 @@ export default function TimetableScreen() {
 
                       <TouchableOpacity
                         style={styles.timeSetterBox}
-                        onPress={() => setActiveTimePicker('end')}
+                        onPress={() => {
+                          triggerHaptic.light();
+                          setActiveTimePicker('end');
+                        }}
                         activeOpacity={0.75}
                       >
                         <View style={styles.timeSetterBoxHeader}>
@@ -781,7 +828,10 @@ export default function TimetableScreen() {
                         <TouchableOpacity
                           key={t}
                           style={[styles.typePill, periodType === t && styles.typePillActive]}
-                          onPress={() => setPeriodType(t)}
+                          onPress={() => {
+                            triggerHaptic.selection();
+                            setPeriodType(t);
+                          }}
                         >
                           <Text style={[styles.typePillText, periodType === t && styles.typePillTextActive]}>
                             {t.toUpperCase()}
@@ -802,7 +852,10 @@ export default function TimetableScreen() {
                           <TouchableOpacity
                             key={pat.id}
                             style={[styles.modalChimeCard, isSelected && styles.modalChimeCardActive]}
-                            onPress={() => setPeriodBellPattern(pat.id)}
+                            onPress={() => {
+                              triggerHaptic.selection();
+                              setPeriodBellPattern(pat.id);
+                            }}
                             activeOpacity={0.7}
                           >
                             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
@@ -815,6 +868,7 @@ export default function TimetableScreen() {
                                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                 onPress={async (e) => {
                                   e.stopPropagation();
+                                  triggerHaptic.light();
                                   await triggerBellTest(pat.id);
                                 }}
                                 style={styles.chimePlayMini}
@@ -847,7 +901,10 @@ export default function TimetableScreen() {
                     <View style={styles.quickPresetRow}>
                       <TouchableOpacity
                         style={[styles.presetChip, periodDays.length === 0 && styles.presetChipActive]}
-                        onPress={() => setPeriodDays([])}
+                        onPress={() => {
+                          triggerHaptic.selection();
+                          setPeriodDays([]);
+                        }}
                       >
                         <Text style={[styles.presetChipText, periodDays.length === 0 && styles.presetChipTextActive]}>
                           All Active Days
@@ -858,7 +915,10 @@ export default function TimetableScreen() {
                           styles.presetChip,
                           periodDays.length === 4 && periodDays.join(',') === '1,2,3,4' && styles.presetChipActive,
                         ]}
-                        onPress={() => setPeriodDays([1, 2, 3, 4])}
+                        onPress={() => {
+                          triggerHaptic.selection();
+                          setPeriodDays([1, 2, 3, 4]);
+                        }}
                       >
                         <Text
                           style={[
@@ -874,7 +934,10 @@ export default function TimetableScreen() {
                           styles.presetChip,
                           periodDays.length === 1 && periodDays[0] === 5 && styles.presetChipActive,
                         ]}
-                        onPress={() => setPeriodDays([5])}
+                        onPress={() => {
+                          triggerHaptic.selection();
+                          setPeriodDays([5]);
+                        }}
                       >
                         <Text
                           style={[
@@ -904,6 +967,7 @@ export default function TimetableScreen() {
                               isCustom && styles.modalDayPillCustom,
                             ]}
                             onPress={() => {
+                              triggerHaptic.selection();
                               let next = periodDays.length === 0 ? [...activeConfig.activeDays] : [...periodDays];
                               if (next.includes(d.day)) {
                                 next = next.filter(x => x !== d.day);
@@ -933,7 +997,10 @@ export default function TimetableScreen() {
                   <View style={styles.modalBtnRow}>
                     <TouchableOpacity
                       style={styles.modalCancelBtn}
-                      onPress={() => setModalVisible(false)}
+                      onPress={() => {
+                        triggerHaptic.light();
+                        setModalVisible(false);
+                      }}
                     >
                       <Text style={styles.modalCancelBtnText}>Cancel</Text>
                     </TouchableOpacity>
@@ -970,7 +1037,10 @@ export default function TimetableScreen() {
                     </Text>
                   </View>
                   <TouchableOpacity
-                    onPress={() => setDefaultToneModalVisible(false)}
+                    onPress={() => {
+                      triggerHaptic.light();
+                      setDefaultToneModalVisible(false);
+                    }}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
                     <Ionicons name="close" size={22} color={colors.textMuted} />
@@ -986,6 +1056,7 @@ export default function TimetableScreen() {
                           key={pat.id}
                           style={[styles.modalChimeCard, isSelected && styles.modalChimeCardActive]}
                           onPress={() => {
+                            triggerHaptic.selection();
                             handleSelectPattern(pat.id);
                             setDefaultToneModalVisible(false);
                           }}
@@ -1001,6 +1072,7 @@ export default function TimetableScreen() {
                               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                               onPress={async (e) => {
                                 e.stopPropagation();
+                                triggerHaptic.light();
                                 await triggerBellTest(pat.id);
                               }}
                               style={styles.chimePlayMini}
@@ -1026,7 +1098,10 @@ export default function TimetableScreen() {
 
                 <TouchableOpacity
                   style={styles.modalDoneBtn}
-                  onPress={() => setDefaultToneModalVisible(false)}
+                  onPress={() => {
+                    triggerHaptic.light();
+                    setDefaultToneModalVisible(false);
+                  }}
                   activeOpacity={0.8}
                 >
                   <Text style={styles.modalDoneBtnText}>Done</Text>

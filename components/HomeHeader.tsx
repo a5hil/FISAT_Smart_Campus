@@ -7,6 +7,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { triggerHaptic } from '../utils/haptics';
+
 export function HomeHeader() {
   const { user, campus, notifications, colors } = useApp();
   const router = useRouter();
@@ -31,7 +33,10 @@ export function HomeHeader() {
       
       <TouchableOpacity 
         style={[styles.bellButton, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}
-        onPress={() => router.push('/notifications')}
+        onPress={() => {
+          triggerHaptic.light();
+          router.push('/notifications');
+        }}
       >
         <Ionicons name="notifications-outline" size={24} color={colors.text} />
         {unreadCount > 0 && (

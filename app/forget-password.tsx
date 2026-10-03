@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-nativ
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
+import { triggerHaptic } from '../utils/haptics';
 
 export default function ForgetPasswordScreen() {
   const router = useRouter();
@@ -10,7 +11,13 @@ export default function ForgetPasswordScreen() {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+      <TouchableOpacity 
+        style={styles.backButton} 
+        onPress={() => {
+          triggerHaptic.light();
+          router.back();
+        }}
+      >
         <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
         <Text style={styles.backText}>Back</Text>
       </TouchableOpacity>
@@ -31,7 +38,13 @@ export default function ForgetPasswordScreen() {
       </View>
 
       {/* Main Action */}
-      <TouchableOpacity style={styles.mainButton} onPress={() => router.push('/verify-email' as any)}>
+      <TouchableOpacity 
+        style={styles.mainButton} 
+        onPress={() => {
+          triggerHaptic.medium();
+          router.push('/verify-email' as any);
+        }}
+      >
         <Text style={styles.mainButtonText}>Send</Text>
       </TouchableOpacity>
     </View>

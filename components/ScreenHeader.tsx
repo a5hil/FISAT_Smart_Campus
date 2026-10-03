@@ -8,6 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useApp } from '../context/AppContext';
 
+import { triggerHaptic } from '../utils/haptics';
+
 interface ScreenHeaderProps {
   title: string;
   showBack?: boolean;
@@ -25,7 +27,10 @@ export function ScreenHeader({ title, showBack = false, rightElement }: ScreenHe
         {showBack && (
           <TouchableOpacity 
             style={[styles.backButton, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}
-            onPress={() => router.back()}
+            onPress={() => {
+              triggerHaptic.light();
+              router.back();
+            }}
           >
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>

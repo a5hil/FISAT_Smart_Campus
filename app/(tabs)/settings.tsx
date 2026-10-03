@@ -7,6 +7,7 @@ import { useApp } from '../../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Esp32LiveBar } from '../../components/Esp32LiveBar';
+import { triggerHaptic } from '../../utils/haptics';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -34,6 +35,7 @@ export default function SettingsScreen() {
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
 
   const handleOpenWifiModal = () => {
+    triggerHaptic.light();
     setInputSsid(esp32Telemetry?.ssid || '');
     setInputPassword('');
     setShowPassword(false);
@@ -42,15 +44,19 @@ export default function SettingsScreen() {
 
   const handleSaveWifi = async () => {
     if (!inputSsid.trim()) {
+      triggerHaptic.warning();
       RNAlert.alert('Required', 'Please enter a Wi-Fi network name (SSID).');
       return;
     }
+    triggerHaptic.medium();
     setUpdatingWifi(true);
     const res = await updateEsp32WiFi(inputSsid.trim(), inputPassword);
     setUpdatingWifi(false);
     if (res.success) {
+      triggerHaptic.success();
       setWifiModalVisible(false);
     } else {
+      triggerHaptic.error();
       RNAlert.alert('Could Not Connect', res.message);
     }
   };
@@ -107,7 +113,10 @@ export default function SettingsScreen() {
                   !isDark && styles.themeOptionBtnActive,
                 ]}
                 activeOpacity={0.8}
-                onPress={() => setThemeMode('light')}
+                onPress={() => {
+                  triggerHaptic.selection();
+                  setThemeMode('light');
+                }}
               >
                 <Ionicons name="sunny" size={17} color={!isDark ? colors.primary : colors.textMuted} />
                 <Text
@@ -129,7 +138,10 @@ export default function SettingsScreen() {
                   isDark && styles.themeOptionBtnActive,
                 ]}
                 activeOpacity={0.8}
-                onPress={() => setThemeMode('dark')}
+                onPress={() => {
+                  triggerHaptic.selection();
+                  setThemeMode('dark');
+                }}
               >
                 <Ionicons name="moon" size={17} color={isDark ? colors.primary : colors.textMuted} />
                 <Text
@@ -221,6 +233,7 @@ export default function SettingsScreen() {
           style={styles.signOutButton}
           activeOpacity={0.8}
           onPress={() => {
+            triggerHaptic.medium();
             RNAlert.alert(
               'Sign Out',
               'Are you sure you want to sign out of this account?',
@@ -230,6 +243,7 @@ export default function SettingsScreen() {
                   text: 'Sign Out',
                   style: 'destructive',
                   onPress: async () => {
+                    triggerHaptic.heavy();
                     await logoutUser();
                     router.replace('/sign-in' as any);
                   },
@@ -296,7 +310,10 @@ export default function SettingsScreen() {
                 />
                 <TouchableOpacity
                   style={styles.eyeBtn}
-                  onPress={() => setShowPassword(!showPassword)}
+                  onPress={() => {
+                    triggerHaptic.selection();
+                    setShowPassword(!showPassword);
+                  }}
                 >
                   <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={18} color={colors.textMuted} />
                 </TouchableOpacity>
@@ -313,7 +330,10 @@ export default function SettingsScreen() {
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={styles.cancelBtn}
-                onPress={() => setWifiModalVisible(false)}
+                onPress={() => {
+                  triggerHaptic.light();
+                  setWifiModalVisible(false);
+                }}
                 disabled={updatingWifi}
               >
                 <Text style={styles.cancelBtnText}>Cancel</Text>

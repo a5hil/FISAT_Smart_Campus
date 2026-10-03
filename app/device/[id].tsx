@@ -21,6 +21,7 @@ import { ScreenHeader } from '../../components/ScreenHeader';
 import { FloatingBottomNav } from '../../components/FloatingBottomNav';
 import { useApp, useTheme } from '../../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
+import { triggerHaptic } from '../../utils/haptics';
 import Svg, {
   Defs,
   LinearGradient as SvgLinearGradient,
@@ -372,7 +373,10 @@ export function ChromaPanelColorStudio({
 
         <TouchableOpacity
           style={dynamicStyles.activeModeBadge}
-          onPress={() => setActiveTab(activeTab === 'wheel' ? 'effects' : 'wheel')}
+          onPress={() => {
+            triggerHaptic.light();
+            setActiveTab(activeTab === 'wheel' ? 'effects' : 'wheel');
+          }}
           activeOpacity={0.7}
         >
           <Ionicons
@@ -517,7 +521,10 @@ export function ChromaPanelColorStudio({
                       dynamicStyles.formatPill,
                       formatMode === fmt && dynamicStyles.formatPillActive,
                     ]}
-                    onPress={() => setFormatMode(fmt)}
+                    onPress={() => {
+                      triggerHaptic.selection();
+                      setFormatMode(fmt);
+                    }}
                     activeOpacity={0.75}
                   >
                     <Text
@@ -554,7 +561,10 @@ export function ChromaPanelColorStudio({
                   style={dynamicStyles.hexSubmitBtn}
                   onPress={() => {
                     if (customHex.match(/^#[0-9A-Fa-f]{6}$/)) {
+                      triggerHaptic.medium();
                       onColorChange(customHex);
+                    } else {
+                      triggerHaptic.warning();
                     }
                   }}
                   activeOpacity={0.8}
@@ -616,6 +626,7 @@ export function ChromaPanelColorStudio({
                       isSelected && dynamicStyles.swatchPillSelected,
                     ]}
                     onPress={() => {
+                      triggerHaptic.light();
                       setCustomHex(swatch.hex);
                       setHsv(hexToHsv(swatch.hex));
                       onColorChange(swatch.hex);
@@ -639,6 +650,7 @@ export function ChromaPanelColorStudio({
                       isSelected && dynamicStyles.swatchPillSelected,
                     ]}
                     onPress={() => {
+                      triggerHaptic.light();
                       setCustomHex(swatch.hex);
                       setHsv(hexToHsv(swatch.hex));
                       onColorChange(swatch.hex);
@@ -666,7 +678,10 @@ export function ChromaPanelColorStudio({
                     dynamicStyles.effectCard,
                     isActive && dynamicStyles.effectCardActive,
                   ]}
-                  onPress={() => onModeChange(eff.id)}
+                  onPress={() => {
+                    triggerHaptic.selection();
+                    onModeChange(eff.id);
+                  }}
                   activeOpacity={0.75}
                 >
                   <View style={[dynamicStyles.effectIconBox, isActive && dynamicStyles.effectIconBoxActive]}>
@@ -696,7 +711,10 @@ export function ChromaPanelColorStudio({
       <View style={dynamicStyles.bottomNavRow}>
         <TouchableOpacity
           style={[dynamicStyles.tabBtn, activeTab === 'wheel' && dynamicStyles.tabBtnActive]}
-          onPress={() => setActiveTab('wheel')}
+          onPress={() => {
+            triggerHaptic.light();
+            setActiveTab('wheel');
+          }}
           activeOpacity={0.75}
         >
           <Ionicons
@@ -711,7 +729,10 @@ export function ChromaPanelColorStudio({
 
         <TouchableOpacity
           style={[dynamicStyles.tabBtn, activeTab === 'effects' && dynamicStyles.tabBtnActive]}
-          onPress={() => setActiveTab('effects')}
+          onPress={() => {
+            triggerHaptic.light();
+            setActiveTab('effects');
+          }}
           activeOpacity={0.75}
         >
           <Ionicons
@@ -1462,6 +1483,7 @@ export default function DeviceDetailScreen() {
             <TouchableOpacity
               style={[styles.actionButton, isOn && styles.actionButtonActive]}
               onPress={() => {
+                triggerHaptic.medium();
                 if (!isOn) toggleDevice(classroom.id, device.id);
               }}
               activeOpacity={0.8}
@@ -1479,6 +1501,7 @@ export default function DeviceDetailScreen() {
             <TouchableOpacity
               style={[styles.actionButton, !isOn && styles.actionButtonActive]}
               onPress={() => {
+                triggerHaptic.medium();
                 if (isOn) toggleDevice(classroom.id, device.id);
               }}
               activeOpacity={0.8}
@@ -1548,6 +1571,7 @@ export default function DeviceDetailScreen() {
             <TouchableOpacity 
               style={styles.editLoadBtn}
               onPress={() => {
+                triggerHaptic.light();
                 setInputWatts(String(currentRated));
                 setEditingLoad(!editingLoad);
               }}
@@ -1573,7 +1597,10 @@ export default function DeviceDetailScreen() {
                   <TouchableOpacity
                     key={p.watts}
                     style={[styles.presetChip, currentRated === p.watts && styles.presetChipActive]}
-                    onPress={() => handleSaveWatts(p.watts)}
+                    onPress={() => {
+                      triggerHaptic.selection();
+                      handleSaveWatts(p.watts);
+                    }}
                     disabled={savingWatts}
                   >
                     <Text style={[styles.presetChipText, currentRated === p.watts && styles.presetChipTextActive]}>
@@ -1588,6 +1615,7 @@ export default function DeviceDetailScreen() {
                 <TouchableOpacity 
                   style={styles.stepBtn}
                   onPress={() => {
+                    triggerHaptic.light();
                     const current = parseInt(inputWatts, 10) || currentRated;
                     const next = Math.max(1, current - 5);
                     setInputWatts(String(next));
@@ -1608,6 +1636,7 @@ export default function DeviceDetailScreen() {
                 <TouchableOpacity 
                   style={styles.stepBtn}
                   onPress={() => {
+                    triggerHaptic.light();
                     const current = parseInt(inputWatts, 10) || currentRated;
                     const next = current + 5;
                     setInputWatts(String(next));
@@ -1618,7 +1647,10 @@ export default function DeviceDetailScreen() {
 
                 <TouchableOpacity 
                   style={styles.saveWattsBtn}
-                  onPress={() => handleSaveWatts()}
+                  onPress={() => {
+                    triggerHaptic.medium();
+                    handleSaveWatts();
+                  }}
                   disabled={savingWatts}
                   activeOpacity={0.8}
                 >
@@ -1647,6 +1679,7 @@ export default function DeviceDetailScreen() {
             <Switch
               value={scheduleEnabled}
               onValueChange={(val) => {
+                triggerHaptic.medium();
                 setScheduleEnabled(val);
                 handleSaveSchedule(val, undefined);
               }}
@@ -1671,6 +1704,7 @@ export default function DeviceDetailScreen() {
                     key={preset.label}
                     style={[styles.schedulePresetChip, isActive && styles.schedulePresetChipActive]}
                     onPress={() => {
+                      triggerHaptic.selection();
                       setOnTime(preset.on);
                       setOffTime(preset.off);
                       updateDeviceSchedule(classroom.id, device.id, {
@@ -1699,7 +1733,10 @@ export default function DeviceDetailScreen() {
             {/* Turn ON Time Box */}
             <TouchableOpacity 
               style={styles.timePickerCard}
-              onPress={() => openTimePicker('on')}
+              onPress={() => {
+                triggerHaptic.light();
+                openTimePicker('on');
+              }}
               activeOpacity={0.75}
             >
               <View style={styles.timeSetterBoxHeader}>
@@ -1713,7 +1750,10 @@ export default function DeviceDetailScreen() {
             {/* Turn OFF Time Box */}
             <TouchableOpacity 
               style={styles.timePickerCard}
-              onPress={() => openTimePicker('off')}
+              onPress={() => {
+                triggerHaptic.light();
+                openTimePicker('off');
+              }}
               activeOpacity={0.75}
             >
               <View style={styles.timeSetterBoxHeader}>
@@ -1731,19 +1771,28 @@ export default function DeviceDetailScreen() {
               <Text style={styles.scheduleSectionLabel}>Active Days:</Text>
               <View style={styles.daysPresetRow}>
                 <TouchableOpacity
-                  onPress={() => setSelectedDays([1, 2, 3, 4, 5])}
+                  onPress={() => {
+                    triggerHaptic.selection();
+                    setSelectedDays([1, 2, 3, 4, 5]);
+                  }}
                   style={styles.dayFilterBtn}
                 >
                   <Text style={styles.dayFilterBtnText}>Weekdays</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => setSelectedDays([1, 2, 3, 4, 5, 6, 7])}
+                  onPress={() => {
+                    triggerHaptic.selection();
+                    setSelectedDays([1, 2, 3, 4, 5, 6, 7]);
+                  }}
                   style={styles.dayFilterBtn}
                 >
                   <Text style={styles.dayFilterBtnText}>All</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => setSelectedDays([6, 7])}
+                  onPress={() => {
+                    triggerHaptic.selection();
+                    setSelectedDays([6, 7]);
+                  }}
                   style={styles.dayFilterBtn}
                 >
                   <Text style={styles.dayFilterBtnText}>Weekends</Text>
@@ -1766,7 +1815,10 @@ export default function DeviceDetailScreen() {
                   <TouchableOpacity
                     key={d.day}
                     style={[styles.dayChip, isSelected && styles.dayChipActive]}
-                    onPress={() => toggleDay(d.day)}
+                    onPress={() => {
+                      triggerHaptic.selection();
+                      toggleDay(d.day);
+                    }}
                     activeOpacity={0.7}
                   >
                     <Text style={[styles.dayChipText, isSelected && styles.dayChipTextActive]}>
@@ -1794,6 +1846,7 @@ export default function DeviceDetailScreen() {
             <Switch
               value={autoOffEnabled}
               onValueChange={(val) => {
+                triggerHaptic.medium();
                 setAutoOffEnabled(val);
                 handleSaveSchedule(undefined, val);
               }}
@@ -1820,6 +1873,7 @@ export default function DeviceDetailScreen() {
                       key={item.minutes}
                       style={[styles.autoOffChip, isCurrent && styles.autoOffChipActive]}
                       onPress={() => {
+                        triggerHaptic.selection();
                         setAutoOffMinutes(item.minutes);
                         updateDeviceSchedule(classroom.id, device.id, {
                           enabled: scheduleEnabled,
@@ -1859,7 +1913,10 @@ export default function DeviceDetailScreen() {
           {/* Save Schedule Action Button */}
           <TouchableOpacity
             style={styles.saveScheduleBtn}
-            onPress={() => handleSaveSchedule()}
+            onPress={() => {
+              triggerHaptic.success();
+              handleSaveSchedule();
+            }}
             activeOpacity={0.8}
           >
             <Ionicons name="checkmark-circle-outline" size={18} color={isDark ? '#000000' : '#FFFFFF'} />

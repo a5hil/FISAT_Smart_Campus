@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import { useApp } from '../context/AppContext';
+import { triggerHaptic } from '../utils/haptics';
 
 interface ClassroomCardProps {
   classroom: Classroom;
@@ -24,7 +25,10 @@ export function ClassroomCard({ classroom }: ClassroomCardProps) {
     <TouchableOpacity 
       style={[styles.card, { backgroundColor: colors.card, borderColor: colors.surfaceBorder }]}
       activeOpacity={0.7}
-      onPress={() => router.push(`/classroom/${classroom.id}`)}
+      onPress={() => {
+        triggerHaptic.light();
+        router.push(`/classroom/${classroom.id}`);
+      }}
     >
       <View style={styles.header}>
         <View style={styles.titleContainer}>

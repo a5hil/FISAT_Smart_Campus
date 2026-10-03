@@ -9,6 +9,7 @@ import { NoticeBoardCard } from '../../components/NoticeBoardCard';
 import { useApp, useTheme } from '../../context/AppContext';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { triggerHaptic } from '../../utils/haptics';
 
 export default function HomeScreen() {
   const { classrooms, timetable } = useApp();
@@ -33,7 +34,10 @@ export default function HomeScreen() {
           <TouchableOpacity 
             style={styles.timetableCard}
             activeOpacity={0.8}
-            onPress={() => router.push('/timetable')}
+            onPress={() => {
+              triggerHaptic.light();
+              router.push('/timetable');
+            }}
           >
             <View style={styles.timetableIconBox}>
               <Ionicons name="notifications" size={24} color={colors.primary} />
@@ -65,7 +69,10 @@ export default function HomeScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Smart Classrooms & Zones</Text>
-            <TouchableOpacity onPress={() => router.push('/classrooms')}>
+            <TouchableOpacity onPress={() => {
+              triggerHaptic.light();
+              router.push('/classrooms');
+            }}>
               <Text style={styles.seeAll}>View All</Text>
             </TouchableOpacity>
           </View>

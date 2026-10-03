@@ -6,6 +6,7 @@ import { ScreenHeader } from '../../components/ScreenHeader';
 import { useApp, useTheme } from '../../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 import { EnergyReading } from '../../types';
+import { triggerHaptic } from '../../utils/haptics';
 
 type Period = 'hourly' | 'daily' | 'weekly';
 const screenWidth = Dimensions.get('window').width;
@@ -134,7 +135,10 @@ export default function EnergyScreen() {
                 <TouchableOpacity
                   key={p}
                   style={[styles.periodChip, period === p && styles.periodChipActive]}
-                  onPress={() => setPeriod(p)}
+                  onPress={() => {
+                    triggerHaptic.selection();
+                    setPeriod(p);
+                  }}
                 >
                   <Text style={[styles.periodText, period === p && styles.periodTextActive]}>
                     {p.charAt(0).toUpperCase() + p.slice(1)}
