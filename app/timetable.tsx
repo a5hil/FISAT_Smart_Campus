@@ -11,6 +11,7 @@ import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
 import { useApp, useTheme } from '../context/AppContext';
 import { TimetableConfig, TimetablePeriod, BellPattern } from '../types';
+import { DrumTimePickerModal } from '../components/DrumTimePickerModal';
 
 const DAYS = [
   { day: 1, label: 'Mon', full: 'Monday' },
@@ -53,6 +54,17 @@ export default function TimetableScreen() {
   const [periodName, setPeriodName] = useState('');
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('10:00');
+  const [activeTimePicker, setActiveTimePicker] = useState<'start' | 'end' | null>(null);
+
+  const formatTime12h = (timeStr: string): string => {
+    const parts = (timeStr || '09:00').split(':');
+    const h = parseInt(parts[0] || '0', 10);
+    const m = parseInt(parts[1] || '0', 10);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+  };
+
   const [periodType, setPeriodType] = useState<'class' | 'break' | 'lunch' | 'lab'>('class');
   const [testingBell, setTestingBell] = useState(false);
 
@@ -730,29 +742,37 @@ export default function TimetableScreen() {
                       onChangeText={setPeriodName}
                     />
 
-                    <View style={styles.timeInputRow}>
-                      <View style={{ flex: 1, marginRight: 8 }}>
-                        <Text style={styles.inputLabel}>Start Time (HH:mm)</Text>
-                        <TextInput
-                          style={styles.textInput}
-                          placeholder="09:00"
-                          placeholderTextColor={colors.inputPlaceholder}
-                          value={startTime}
-                          onChangeText={setStartTime}
-                          keyboardType="numbers-and-punctuation"
-                        />
+                    <Text style={styles.inputLabel}>Period Timing</Text>
+                    <View style={styles.timePickerBoxesRow}>
+                      <TouchableOpacity
+                        style={styles.timeSetterBox}
+                        onPress={() => setActiveTimePicker('start')}
+                        activeOpacity={0.75}
+                      >
+                        <View style={styles.timeSetterBoxHeader}>
+                          <Ionicons name="play-circle-outline" size={14} color={colors.primary} />
+                          <Text style={styles.timeSetterBoxTitle}>START TIME</Text>
+                        </View>
+                        <Text style={styles.timeDisplayBig}>{formatTime12h(startTime)}</Text>
+                        <Text style={styles.timeDisplaySub}>{startTime} (24-Hour)</Text>
+                      </TouchableOpacity>
+
+                      <View style={styles.timeArrowDivider}>
+                        <Ionicons name="arrow-forward" size={16} color={colors.textMuted} />
                       </View>
-                      <View style={{ flex: 1, marginLeft: 8 }}>
-                        <Text style={styles.inputLabel}>End Time (HH:mm)</Text>
-                        <TextInput
-                          style={styles.textInput}
-                          placeholder="10:00"
-                          placeholderTextColor={colors.inputPlaceholder}
-                          value={endTime}
-                          onChangeText={setEndTime}
-                          keyboardType="numbers-and-punctuation"
-                        />
-                      </View>
+
+                      <TouchableOpacity
+                        style={styles.timeSetterBox}
+                        onPress={() => setActiveTimePicker('end')}
+                        activeOpacity={0.75}
+                      >
+                        <View style={styles.timeSetterBoxHeader}>
+                          <Ionicons name="stop-circle-outline" size={14} color={colors.critical} />
+                          <Text style={styles.timeSetterBoxTitle}>END TIME</Text>
+                        </View>
+                        <Text style={styles.timeDisplayBig}>{formatTime12h(endTime)}</Text>
+                        <Text style={styles.timeDisplaySub}>{endTime} (24-Hour)</Text>
+                      </TouchableOpacity>
                     </View>
 
                     <Text style={styles.inputLabel}>Period Type</Text>
@@ -1016,6 +1036,24 @@ export default function TimetableScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {/* Smooth Drum Wheel Roller Time Picker Modal for Period Timings */}
+      <DrumTimePickerModal
+        visible={activeTimePicker !== null}
+        target={activeTimePicker === 'start' ? 'on' : 'off'}
+        initialTime={activeTimePicker === 'start' ? startTime : endTime}
+        title={activeTimePicker === 'start' ? 'Set Period Start Time' : 'Set Period End Time'}
+        subtitle={activeTimePicker === 'start' ? `Schedule start time for ${periodName || 'period'}` : `Schedule end time for ${periodName || 'period'}`}
+        onConfirm={(formattedTime) => {
+          if (activeTimePicker === 'start') {
+            setStartTime(formattedTime);
+          } else if (activeTimePicker === 'end') {
+            setEndTime(formattedTime);
+          }
+          setActiveTimePicker(null);
+        }}
+        onCancel={() => setActiveTimePicker(null)}
+      />
     </View>
   );
 }
@@ -1630,9 +1668,48 @@ function getStyles(colors: any, isDark: boolean) {
       borderColor: colors.inputBorder,
       marginBottom: 12,
     },
-    timeInputRow: {
+    timePickerBoxesRow: {
       flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 14,
+      gap: 8,
+    },
+    timeSetterBox: {
+      flex: 1,
+      backgroundColor: colors.inputBackground,
+      borderRadius: Layout.radius.md,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+    },
+    timeSetterBoxHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
       marginBottom: 6,
+    },
+    timeSetterBoxTitle: {
+      fontSize: 10,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.textMuted,
+    },
+    timeDisplayBig: {
+      color: colors.text,
+      fontSize: 17,
+      fontWeight: '800',
+      fontVariant: ['tabular-nums'],
+    },
+    timeDisplaySub: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginTop: 3,
+      marginBottom: 0,
+    },
+    timeArrowDivider: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 2,
     },
     typeSelectorRow: {
       flexDirection: 'row',

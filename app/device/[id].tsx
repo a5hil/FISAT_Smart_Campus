@@ -13,7 +13,7 @@ import {
   GestureResponderEvent,
   PanResponderGestureState,
 } from 'react-native';
-import DateTimePicker, { DateTimePickerAndroid, DateTimePickerChangeEvent } from '@react-native-community/datetimepicker';
+import { DrumTimePickerModal } from '../../components/DrumTimePickerModal';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '../../constants/colors';
 import { Layout } from '../../constants/layout';
@@ -232,14 +232,20 @@ export function ChromaPanelColorStudio({
     }
   };
 
+  // PanResponder is created once (useRef), so its callbacks would otherwise freeze the
+  // first-render closures (stale props, stale sliderWidth, stale parent handlers that
+  // capture the initial device color). Always dispatch through refs updated every render.
+  const wheelTouchRef = useRef(handleWheelTouch);
+  wheelTouchRef.current = handleWheelTouch;
+
   const wheelPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => handleWheelTouch(evt.nativeEvent.locationX, evt.nativeEvent.locationY, false),
-      onPanResponderMove: (evt) => handleWheelTouch(evt.nativeEvent.locationX, evt.nativeEvent.locationY, false),
-      onPanResponderRelease: (evt) => handleWheelTouch(evt.nativeEvent.locationX, evt.nativeEvent.locationY, true),
-      onPanResponderTerminate: (evt) => handleWheelTouch(evt.nativeEvent.locationX, evt.nativeEvent.locationY, true),
+      onPanResponderGrant: (evt) => wheelTouchRef.current(evt.nativeEvent.locationX, evt.nativeEvent.locationY, false),
+      onPanResponderMove: (evt) => wheelTouchRef.current(evt.nativeEvent.locationX, evt.nativeEvent.locationY, false),
+      onPanResponderRelease: (evt) => wheelTouchRef.current(evt.nativeEvent.locationX, evt.nativeEvent.locationY, true),
+      onPanResponderTerminate: (evt) => wheelTouchRef.current(evt.nativeEvent.locationX, evt.nativeEvent.locationY, true),
     })
   ).current;
 
@@ -269,20 +275,26 @@ export function ChromaPanelColorStudio({
         briThrottleTimer.current = setTimeout(() => {
           briThrottleTimer.current = null;
           lastBriSendRef.current = Date.now();
-          onBrightnessChange(pct);
+          // Use the latest parent handler, not the one captured when the timer was scheduled
+          onBrightnessChangeRef.current(pct);
         }, 50);
       }
     }
   };
 
+  const onBrightnessChangeRef = useRef(onBrightnessChange);
+  onBrightnessChangeRef.current = onBrightnessChange;
+  const brightnessSlideRef = useRef(handleBrightnessSlide);
+  brightnessSlideRef.current = handleBrightnessSlide;
+
   const brightnessPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => handleBrightnessSlide(evt.nativeEvent.locationX, false),
-      onPanResponderMove: (evt) => handleBrightnessSlide(evt.nativeEvent.locationX, false),
-      onPanResponderRelease: (evt) => handleBrightnessSlide(evt.nativeEvent.locationX, true),
-      onPanResponderTerminate: (evt) => handleBrightnessSlide(evt.nativeEvent.locationX, true),
+      onPanResponderGrant: (evt) => brightnessSlideRef.current(evt.nativeEvent.locationX, false),
+      onPanResponderMove: (evt) => brightnessSlideRef.current(evt.nativeEvent.locationX, false),
+      onPanResponderRelease: (evt) => brightnessSlideRef.current(evt.nativeEvent.locationX, true),
+      onPanResponderTerminate: (evt) => brightnessSlideRef.current(evt.nativeEvent.locationX, true),
     })
   ).current;
 
@@ -294,15 +306,20 @@ export function ChromaPanelColorStudio({
     const ratio = clampedX / sliderWidth;
     const idx = Math.min(KELVIN_COLORS.length - 1, Math.floor(ratio * KELVIN_COLORS.length));
     const chosenColor = KELVIN_COLORS[idx];
+    setCustomHex(chosenColor);
+    setHsv(hexToHsv(chosenColor));
     onColorChange(chosenColor);
   };
+
+  const warmthSlideRef = useRef(handleWarmthSlide);
+  warmthSlideRef.current = handleWarmthSlide;
 
   const warmthPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => handleWarmthSlide(evt.nativeEvent.locationX),
-      onPanResponderMove: (evt) => handleWarmthSlide(evt.nativeEvent.locationX),
+      onPanResponderGrant: (evt) => warmthSlideRef.current(evt.nativeEvent.locationX),
+      onPanResponderMove: (evt) => warmthSlideRef.current(evt.nativeEvent.locationX),
     })
   ).current;
 
@@ -598,7 +615,11 @@ export function ChromaPanelColorStudio({
                       { backgroundColor: swatch.hex },
                       isSelected && dynamicStyles.swatchPillSelected,
                     ]}
-                    onPress={() => onColorChange(swatch.hex)}
+                    onPress={() => {
+                      setCustomHex(swatch.hex);
+                      setHsv(hexToHsv(swatch.hex));
+                      onColorChange(swatch.hex);
+                    }}
                     activeOpacity={0.8}
                   />
                 );
@@ -617,7 +638,11 @@ export function ChromaPanelColorStudio({
                       { backgroundColor: swatch.hex },
                       isSelected && dynamicStyles.swatchPillSelected,
                     ]}
-                    onPress={() => onColorChange(swatch.hex)}
+                    onPress={() => {
+                      setCustomHex(swatch.hex);
+                      setHsv(hexToHsv(swatch.hex));
+                      onColorChange(swatch.hex);
+                    }}
                     activeOpacity={0.8}
                   />
                 );
@@ -1101,6 +1126,11 @@ export default function DeviceDetailScreen() {
   const currentRgbMode = device.rgbMode || device.mode || 'solid';
   const [selectedRgbMode, setSelectedRgbMode] = useState<string>(currentRgbMode);
   const lastUserModeSelectMsRef = useRef<number>(0);
+  const activeColorRef = useRef<string>(currentColor);
+
+  useEffect(() => {
+    activeColorRef.current = currentColor;
+  }, [currentColor]);
 
   useEffect(() => {
     // Only synchronize from background device updates if user hasn't actively switched mode in last 4s
@@ -1136,7 +1166,6 @@ export default function DeviceDetailScreen() {
 
   // Time Picker State
   const [activePicker, setActivePicker] = useState<'on' | 'off' | null>(null);
-  const [tempPickerDate, setTempPickerDate] = useState<Date>(new Date());
 
   // Prevent background polling from overwriting in-flight user edits
   const prevDeviceIdRef = useRef(device.id);
@@ -1185,29 +1214,6 @@ export default function DeviceDetailScreen() {
   };
 
   const openTimePicker = (target: 'on' | 'off') => {
-    const initialDate = timeStringToDate(target === 'on' ? onTime : offTime);
-    setTempPickerDate(initialDate);
-
-    if (Platform.OS === 'android') {
-      try {
-        DateTimePickerAndroid.open({
-          value: initialDate,
-          mode: 'time',
-          is24Hour: false,
-          onValueChange: (_event: DateTimePickerChangeEvent, selectedDate?: Date) => {
-            if (selectedDate) {
-              const formatted = dateToTimeString(selectedDate);
-              handleTimeConfirmed(target, formatted);
-            }
-          },
-          onDismiss: () => {},
-        });
-        return;
-      } catch (e) {
-        console.warn('DateTimePickerAndroid open fallback', e);
-      }
-    }
-
     setActivePicker(target);
   };
 
@@ -1274,25 +1280,40 @@ export default function DeviceDetailScreen() {
   };
 
   const handleColorChange = (hex: string) => {
+    activeColorRef.current = hex;
+    setCustomHex(hex);
     // If the strip is in an animation mode that overrides color (e.g. fireplace flicker or rainbow wave),
     // selecting a specific chromatic hue on the color wheel intelligently switches to 'solid' mode
     const nextMode = (selectedRgbMode === 'fire' || selectedRgbMode === 'rainbow') ? 'solid' : selectedRgbMode;
+    const updates: Partial<typeof device> = { color: hex };
     if (nextMode !== selectedRgbMode) {
       lastUserModeSelectMsRef.current = Date.now();
       setSelectedRgbMode(nextMode);
+      updates.rgbMode = nextMode;
     }
-    updateDeviceValue(classroom.id, device.id, { color: hex, rgbMode: nextMode, status: 'on' });
+    if (!isOn) updates.status = 'on';
+    updateDeviceValue(classroom.id, device.id, updates);
   };
 
   const handleBrightnessChange = (val: number) => {
     const clamped = Math.max(10, Math.min(100, Math.round(val)));
-    updateDeviceValue(classroom.id, device.id, { brightness: clamped, status: 'on' });
+    // Color/mode are intentionally NOT sent from here: AppContext resolves them from its
+    // in-flight refs (latest user selection), so brightness can never carry a stale color.
+    const updates: Partial<typeof device> = { brightness: clamped };
+    if (!isOn) updates.status = 'on';
+    updateDeviceValue(classroom.id, device.id, updates);
   };
 
   const handleModeChange = (mode: string) => {
     lastUserModeSelectMsRef.current = Date.now();
     setSelectedRgbMode(mode);
-    updateDeviceValue(classroom.id, device.id, { rgbMode: mode, status: 'on' });
+    const activeColor = activeColorRef.current || customHex || currentColor || device.color || '#FF6B00';
+    updateDeviceValue(classroom.id, device.id, {
+      rgbMode: mode,
+      color: activeColor,
+      brightness: currentBrightness,
+      status: 'on',
+    });
   };
 
   const RGB_PRESETS = [
@@ -1687,11 +1708,6 @@ export default function DeviceDetailScreen() {
               </View>
               <Text style={styles.timeDisplayBig}>{formatTime12h(onTime)}</Text>
               <Text style={styles.timeDisplaySub}>{onTime} (24-Hour)</Text>
-              
-              <View style={styles.pickTimeActionRow}>
-                <Ionicons name="time-outline" size={14} color={colors.primary} />
-                <Text style={styles.pickTimeActionText}>Pick Time</Text>
-              </View>
             </TouchableOpacity>
 
             {/* Turn OFF Time Box */}
@@ -1706,11 +1722,6 @@ export default function DeviceDetailScreen() {
               </View>
               <Text style={styles.timeDisplayBig}>{formatTime12h(offTime)}</Text>
               <Text style={styles.timeDisplaySub}>{offTime} (24-Hour)</Text>
-              
-              <View style={styles.pickTimeActionRow}>
-                <Ionicons name="time-outline" size={14} color={colors.primary} />
-                <Text style={styles.pickTimeActionText}>Pick Time</Text>
-              </View>
             </TouchableOpacity>
           </View>
 
@@ -1888,186 +1899,21 @@ export default function DeviceDetailScreen() {
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* iOS Modal Spinner Time Picker */}
-      {Platform.OS === 'ios' && (
-        <Modal
-          visible={activePicker !== null}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setActivePicker(null)}
-        >
-          <TouchableOpacity 
-            style={styles.modalOverlay}
-            activeOpacity={1}
-            onPress={() => setActivePicker(null)}
-          >
-            <TouchableOpacity activeOpacity={1} style={styles.iosPickerContainer}>
-              <View style={styles.iosPickerHeader}>
-                <TouchableOpacity onPress={() => setActivePicker(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                  <Text style={styles.iosPickerCancel}>Cancel</Text>
-                </TouchableOpacity>
-                <Text style={styles.iosPickerTitle}>
-                  {activePicker === 'on' ? 'Set Power ON Time' : 'Set Power OFF Time'}
-                </Text>
-                <TouchableOpacity 
-                  onPress={() => {
-                    if (activePicker) {
-                      const formatted = dateToTimeString(tempPickerDate);
-                      handleTimeConfirmed(activePicker, formatted);
-                    }
-                    setActivePicker(null);
-                  }}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Text style={styles.iosPickerDone}>Done</Text>
-                </TouchableOpacity>
-              </View>
-              <DateTimePicker
-                value={tempPickerDate}
-                mode="time"
-                is24Hour={false}
-                display="spinner"
-                textColor={colors.text}
-                onValueChange={(_event: DateTimePickerChangeEvent, date?: Date) => {
-                  if (date) setTempPickerDate(date);
-                }}
-                onDismiss={() => {
-                  setActivePicker(null);
-                }}
-              />
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </Modal>
-      )}
-
-      {/* Web & Universal Fallback Interactive Time Picker Modal */}
-      {Platform.OS !== 'ios' && Platform.OS !== 'android' && (
-        <Modal
-          visible={activePicker !== null}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setActivePicker(null)}
-        >
-          <TouchableOpacity 
-            style={styles.modalOverlay}
-            activeOpacity={1}
-            onPress={() => setActivePicker(null)}
-          >
-            <TouchableOpacity activeOpacity={1} style={styles.webPickerContainer}>
-              <View style={styles.iosPickerHeader}>
-                <Text style={styles.iosPickerTitle}>
-                  {activePicker === 'on' ? 'Set Power ON Time' : 'Set Power OFF Time'}
-                </Text>
-                <TouchableOpacity onPress={() => setActivePicker(null)}>
-                  <Ionicons name="close" size={20} color={colors.textMuted} />
-                </TouchableOpacity>
-              </View>
-              <View style={styles.webPickerBody}>
-                <Text style={styles.webPickerSubLabel}>Select Hour</Text>
-                <View style={styles.webPickerGrid}>
-                  {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(h => {
-                    const currentHours = tempPickerDate.getHours();
-                    const currentH12 = currentHours % 12 === 0 ? 12 : currentHours % 12;
-                    const isSelected = currentH12 === h;
-                    return (
-                      <TouchableOpacity
-                        key={h}
-                        style={[styles.webPickerGridBtn, isSelected && styles.webPickerGridBtnActive]}
-                        onPress={() => {
-                          const isPM = tempPickerDate.getHours() >= 12;
-                          const newH = (h % 12) + (isPM ? 12 : 0);
-                          const d = new Date(tempPickerDate);
-                          d.setHours(newH);
-                          setTempPickerDate(d);
-                        }}
-                      >
-                        <Text style={[styles.webPickerGridText, isSelected && styles.webPickerGridTextActive]}>
-                          {h}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
-                <Text style={styles.webPickerSubLabel}>Select Minute</Text>
-                <View style={styles.webPickerGrid}>
-                  {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map(m => {
-                    const isSelected = tempPickerDate.getMinutes() === m;
-                    return (
-                      <TouchableOpacity
-                        key={m}
-                        style={[styles.webPickerGridBtn, isSelected && styles.webPickerGridBtnActive]}
-                        onPress={() => {
-                          const d = new Date(tempPickerDate);
-                          d.setMinutes(m);
-                          setTempPickerDate(d);
-                        }}
-                      >
-                        <Text style={[styles.webPickerGridText, isSelected && styles.webPickerGridTextActive]}>
-                          {String(m).padStart(2, '0')}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
-                <View style={styles.webPickerAmPmRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.webPickerAmPmBtn,
-                      tempPickerDate.getHours() < 12 && styles.webPickerAmPmBtnActive
-                    ]}
-                    onPress={() => {
-                      if (tempPickerDate.getHours() >= 12) {
-                        const d = new Date(tempPickerDate);
-                        d.setHours(tempPickerDate.getHours() - 12);
-                        setTempPickerDate(d);
-                      }
-                    }}
-                  >
-                    <Text style={[
-                      styles.webPickerAmPmText,
-                      tempPickerDate.getHours() < 12 && styles.webPickerAmPmTextActive
-                    ]}>AM</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.webPickerAmPmBtn,
-                      tempPickerDate.getHours() >= 12 && styles.webPickerAmPmBtnActive
-                    ]}
-                    onPress={() => {
-                      if (tempPickerDate.getHours() < 12) {
-                        const d = new Date(tempPickerDate);
-                        d.setHours(tempPickerDate.getHours() + 12);
-                        setTempPickerDate(d);
-                      }
-                    }}
-                  >
-                    <Text style={[
-                      styles.webPickerAmPmText,
-                      tempPickerDate.getHours() >= 12 && styles.webPickerAmPmTextActive
-                    ]}>PM</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.saveScheduleBtn}
-                  onPress={() => {
-                    if (activePicker) {
-                      const formatted = dateToTimeString(tempPickerDate);
-                      handleTimeConfirmed(activePicker, formatted);
-                    }
-                    setActivePicker(null);
-                  }}
-                >
-                  <Text style={styles.saveScheduleBtnText}>Confirm {formatTime12h(dateToTimeString(tempPickerDate))}</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </Modal>
-      )}
+      {/* Smooth Drum Wheel Roller Time Picker (Android, iOS & Universal) */}
+      <DrumTimePickerModal
+        visible={activePicker !== null}
+        target={activePicker || 'on'}
+        initialTime={activePicker === 'on' ? onTime : offTime}
+        title={activePicker === 'on' ? 'Schedule Power ON' : 'Schedule Power OFF'}
+        subtitle={activePicker === 'on' ? `${device.name} turns ON automatically` : `${device.name} turns OFF automatically`}
+        onConfirm={(formattedTime) => {
+          if (activePicker) {
+            handleTimeConfirmed(activePicker, formattedTime);
+          }
+          setActivePicker(null);
+        }}
+        onCancel={() => setActivePicker(null)}
+      />
 
       <FloatingBottomNav activeTab="classrooms" />
     </View>
@@ -2732,7 +2578,7 @@ function getStyles(colors: any, isDark: boolean) {
       flex: 1,
       backgroundColor: isDark ? 'rgba(255, 255, 255, 0.04)' : colors.cardSecondary,
       borderRadius: Layout.radius.md,
-      padding: 12,
+      padding: 14,
       borderWidth: 1,
       borderColor: colors.surfaceBorder,
     },
@@ -2757,25 +2603,8 @@ function getStyles(colors: any, isDark: boolean) {
     timeDisplaySub: {
       color: colors.textMuted,
       fontSize: 11,
-      marginTop: 2,
-      marginBottom: 8,
-    },
-    pickTimeActionRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      paddingVertical: 7,
-      paddingHorizontal: 10,
-      borderRadius: 6,
-      backgroundColor: isDark ? 'rgba(253, 168, 58, 0.12)' : 'rgba(217, 119, 6, 0.08)',
-      borderWidth: 1,
-      borderColor: isDark ? 'rgba(253, 168, 58, 0.3)' : 'rgba(217, 119, 6, 0.25)',
-    },
-    pickTimeActionText: {
-      color: colors.primary,
-      fontSize: 12,
-      fontWeight: '700',
+      marginTop: 3,
+      marginBottom: 0,
     },
     modalOverlay: {
       flex: 1,

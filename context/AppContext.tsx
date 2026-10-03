@@ -340,6 +340,42 @@ function buildClassrooms(
   });
 }
 
+/**
+ * Safely send a broadcast message over a Supabase Realtime channel.
+ * Uses Phoenix WebSocket push when connected (canPush() === true).
+ * Explicitly uses httpSend() when the WebSocket is not ready, completely
+ * eliminating the "Realtime send() is automatically falling back to REST API" warning.
+ */
+function safeRealtimeBroadcast(
+  channel: ReturnType<typeof supabase.channel> | null,
+  event: string,
+  payload: Record<string, unknown>
+): void {
+  if (!channel) return;
+  const ch = channel as any;
+  try {
+    if (ch.channelAdapter?.canPush?.()) {
+      void ch.send({
+        type: 'broadcast',
+        event,
+        payload,
+      });
+    } else if (typeof ch.httpSend === 'function') {
+      void ch.httpSend(event, payload).catch((err: any) => {
+        console.warn(`[REALTIME] httpSend error for ${event}:`, err?.message || err);
+      });
+    } else {
+      void ch.send({
+        type: 'broadcast',
+        event,
+        payload,
+      });
+    }
+  } catch (e) {
+    console.warn(`[REALTIME] Broadcast error for ${event}:`, e);
+  }
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User>(mockUser);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -358,9 +394,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const curtains = allDevices.filter(d => d.category === 'curtain');
 
     return {
-      allLights: lights.length > 0 && lights.some(d => d.status === 'on'),
-      allFans: fans.length > 0 && fans.some(d => d.status === 'on'),
-      allCurtains: curtains.length > 0 && curtains.some(d => d.status === 'on'),
+      allLights: lights.length > 0 && lights.every(d => d.status === 'on'),
+      allFans: fans.length > 0 && fans.every(d => d.status === 'on'),
+      allCurtains: curtains.length > 0 && curtains.every(d => d.status === 'on'),
     };
   }, [classrooms]);
   const [isReady, setIsReady] = useState(false);
@@ -390,21 +426,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const lastBellTestTimeRef = useRef<number>(0);
 
   const broadcastDeviceCommand = useCallback((devCode: string, state: boolean, extra?: Record<string, unknown>) => {
-    if (!realtimeControlChannelRef.current) return;
-    try {
-      void realtimeControlChannelRef.current.send({
-        type: 'broadcast',
-        event: 'cmd',
-        payload: {
-          dev: devCode,
-          st: state ? 1 : 0,
-          t: Date.now(),
-          ...extra,
-        },
-      });
-    } catch (e) {
-      console.warn('[REALTIME] Broadcast error:', e);
-    }
+    safeRealtimeBroadcast(realtimeControlChannelRef.current, 'cmd', {
+      dev: devCode,
+      st: state ? 1 : 0,
+      t: Date.now(),
+      ...extra,
+    });
   }, []);
 
   const setThemeMode = useCallback((mode: ThemeMode) => {
@@ -599,10 +626,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       setNotices(validNotices);
 
-      // Clean up any expired notices from cloud
+      // Clean up any expired notices from cloud immediately
       if (expiredIds.length > 0 && isSupabaseConfigured) {
-        void supabase.from('announcements').delete().in('id', expiredIds);
-        void supabase.from('notifications').delete().in('id', expiredIds);
+        try {
+          await supabase.from('announcements').delete().in('id', expiredIds);
+          await supabase.from('notifications').delete().in('id', expiredIds);
+        } catch (err) {
+          console.warn('Could not prune expired announcements:', err);
+        }
       }
     } catch (e) {
       console.warn('Could not load announcements from Supabase:', e);
@@ -721,6 +752,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(STORAGE_KEYS.NOTICES, JSON.stringify(notices)).catch(console.error);
   }, [notices, isReady]);
 
+  // Periodic Notice Expiration Sweeper (Runs every 30s)
+  // Ensures notices naturally expiring in the background are cleanly removed from state and Supabase
+  useEffect(() => {
+    if (!isReady) return;
+    const sweep = () => {
+      const now = Date.now();
+      const current = noticesRef.current;
+      const expired = current.filter(n => n.expiresAt && new Date(n.expiresAt).getTime() <= now);
+      if (expired.length > 0) {
+        const expiredIds = expired.map(n => n.id);
+        setNotices(prev => prev.filter(n => !expiredIds.includes(n.id)));
+        if (isSupabaseConfigured) {
+          void supabase.from('announcements').delete().in('id', expiredIds);
+        }
+      }
+    };
+    sweep();
+    const interval = setInterval(sweep, 30000);
+    return () => clearInterval(interval);
+  }, [isReady]);
+
   // Listen for Live Updates from Supabase (Devices, Sensor Telemetry & Controller Heartbeats)!
   useEffect(() => {
     if (!isReady || !isSupabaseConfigured) return;
@@ -751,19 +803,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
             // Shield recent local toggles from stale echoes
             const timeSinceToggle = Date.now() - (lastUserToggleRef.current[newRecord.id] || 0);
-            if (timeSinceToggle < 3500) {
+            if (timeSinceToggle < 6000) {
               const expectedStatus = pendingUserToggleStateRef.current[newRecord.id];
               if (expectedStatus && newRecord.status !== expectedStatus) {
                 // Echo has stale status, ignore!
                 return;
-              } else {
-                delete lastUserToggleRef.current[newRecord.id];
-                delete pendingUserToggleStateRef.current[newRecord.id];
               }
             }
 
             setClassrooms(prev => prev.map(cls => {
-              if (cls.id !== newRecord.classroom_id) return cls;
+              const belongsToClassroom = cls.id === newRecord.classroom_id || cls.devices.some(d => d.id === newRecord.id);
+              if (!belongsToClassroom) return cls;
               const updatedDevices = cls.devices.map(dev => {
                 if (dev.id !== newRecord.id) return dev;
                 const newSettings = (newRecord.settings as Record<string, unknown>) || {};
@@ -875,6 +925,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             if (data) {
               const now = Date.now();
               const validList: NoticeItem[] = [];
+              const expiredIds: string[] = [];
               for (const a of data as AnnouncementRow[]) {
                 let duration: NoticeDuration = (a.duration as NoticeDuration) || '24h';
                 let expiresAt: string | null = a.expires_at || null;
@@ -885,7 +936,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 }
 
                 if (expiresAt && new Date(expiresAt).getTime() <= now) {
-                  // expired
+                  expiredIds.push(a.id);
                 } else if (a.is_active !== false) {
                   validList.push({
                     id: a.id,
@@ -901,6 +952,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 }
               }
               setNotices(validList);
+
+              if (expiredIds.length > 0 && isSupabaseConfigured) {
+                void supabase.from('announcements').delete().in('id', expiredIds);
+              }
             }
           } catch (e) {
             console.error('Failed to update announcements from Realtime:', e);
@@ -916,15 +971,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     controlChannel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         // Send initial clock synchronization to ESP32 hardware RTC
-        void controlChannel.send({
-          type: 'broadcast',
-          event: 'cmd',
-          payload: {
-            dev: 'time',
-            st: 1,
-            epoch: Math.floor(Date.now() / 1000),
-            t: Date.now(),
-          },
+        safeRealtimeBroadcast(controlChannel, 'cmd', {
+          dev: 'time',
+          st: 1,
+          epoch: Math.floor(Date.now() / 1000),
+          t: Date.now(),
         });
       }
     });
@@ -932,18 +983,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // Periodic time sync every 60s keeps ESP32 hardware RTC accurate even across mobile data
     const timeSyncInterval = setInterval(() => {
-      if (realtimeControlChannelRef.current) {
-        void realtimeControlChannelRef.current.send({
-          type: 'broadcast',
-          event: 'cmd',
-          payload: {
-            dev: 'time',
-            st: 1,
-            epoch: Math.floor(Date.now() / 1000),
-            t: Date.now(),
-          },
-        });
-      }
+      safeRealtimeBroadcast(realtimeControlChannelRef.current, 'cmd', {
+        dev: 'time',
+        st: 1,
+        epoch: Math.floor(Date.now() / 1000),
+        t: Date.now(),
+      });
     }, 60000);
 
     return () => {
@@ -951,6 +996,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       supabase.removeChannel(channel);
       if (controlChannel) supabase.removeChannel(controlChannel);
       realtimeControlChannelRef.current = null;
+      Object.values(debouncedSyncTimeoutRef.current).forEach(clearTimeout);
+      debouncedSyncTimeoutRef.current = {};
     };
   }, [isReady]);
 
@@ -1045,6 +1092,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ldr2Raw: Number(data.corridors?.ldr2_raw) || 0,
           light1: Boolean(data.corridors?.light1),
           light2: Boolean(data.corridors?.light2),
+          rgb: data.corridors?.rgb ? {
+            power: Boolean(data.corridors.rgb.power ?? data.corridors.rgb.status),
+            color: data.corridors.rgb.color || '#FF6B00',
+            brightness: Number(data.corridors.rgb.brightness) || 80,
+            mode: data.corridors.rgb.mode || 'solid',
+          } : undefined,
         },
       };
       setEsp32Telemetry(telemetry);
@@ -1095,7 +1148,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const hwStatus: DeviceStatus = hardwareIsOn ? 'on' : 'off';
         const timeSinceToggle = Date.now() - (lastUserToggleRef.current[dev.id] || 0);
 
-        if (timeSinceToggle < 3500) {
+        if (timeSinceToggle < 6000) {
           const expected = pendingUserToggleStateRef.current[dev.id];
           if (expected && hwStatus !== expected) {
             // Retain optimistic user intent while hardware or poll catches up
@@ -1104,9 +1157,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
               ratedPower: rated,
               powerUsage: dev.status === 'on' ? rated : 0,
             };
-          } else {
-            delete lastUserToggleRef.current[dev.id];
-            delete pendingUserToggleStateRef.current[dev.id];
           }
         }
 
@@ -1250,8 +1300,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 mode: effectiveRgbMode,
               };
             }
-            const isDev1 = dev.id.includes('1');
-            const hwOn = isDev1 ? telemetry.corridors.light1 : telemetry.corridors.light2;
+            const isDev1 = dev.id.includes('light-1') || dev.id.includes('light1') || (dev.id.includes('1') && !dev.id.includes('2'));
+            const isDev2 = dev.id.includes('light-2') || dev.id.includes('light2') || dev.id.includes('2');
+            const hwOn = isDev1 ? telemetry.corridors.light1 : isDev2 ? telemetry.corridors.light2 : (dev.status === 'on');
             const res = resolveDeviceStatus(dev, hwOn);
             return { ...dev, ...res };
           });
@@ -1312,13 +1363,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 if (!cloudDev) return dev;
                 // Protect recent optimistic toggle from being overwritten by in-flight cloud sync
                 const timeSinceToggle = Date.now() - (lastUserToggleRef.current[dev.id] || 0);
-                if (timeSinceToggle < 3500) {
+                if (timeSinceToggle < 6000) {
                   const expected = pendingUserToggleStateRef.current[dev.id];
                   if (expected && cloudDev.status !== expected) {
                     return dev;
-                  } else {
-                    delete lastUserToggleRef.current[dev.id];
-                    delete pendingUserToggleStateRef.current[dev.id];
                   }
                 }
                 const cloudSettings = (cloudDev.settings as Record<string, unknown>) || {};
@@ -1440,7 +1488,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [systemMode, setSystemMode]);
 
   const toggleDevice = useCallback((classroomId: string, deviceId: string) => {
-    const targetClass = classrooms.find(c => c.id === classroomId);
+    const targetClass = classrooms.find(c => c.id === classroomId) || classrooms.find(c => c.devices.some(d => d.id === deviceId));
+    const effectiveClassroomId = targetClass?.id || classroomId;
     const targetDev = targetClass?.devices.find(d => d.id === deviceId);
     if (!targetDev || targetDev.status === 'offline') return;
 
@@ -1456,7 +1505,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     pendingUserToggleStateRef.current[deviceId] = newStatus;
 
     // 1. FAST LAN PATH: Dispatch command directly to ESP32 hardware immediately (<5ms)
-    const devCode = mapDeviceToEsp32Code(classroomId, targetDev);
+    const devCode = mapDeviceToEsp32Code(effectiveClassroomId, targetDev);
     const candidateIps = new Set<string>();
     if (esp32Ip && esp32Ip.trim()) candidateIps.add(esp32Ip.trim());
     if (targetClass?.controller?.ipAddress && targetClass.controller.ipAddress.trim()) {
@@ -1468,12 +1517,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // Resolve RGB params: trust in-flight refs only while fresh, else live device state
+    const rgbPendingFresh = Date.now() - lastRgbChangeRef.current < 5000;
+    const rgbCol = (rgbPendingFresh && pendingRgbColorRef.current) || targetDev.color || '#FF6B00';
+    const rgbBri = (rgbPendingFresh && pendingRgbBrightnessRef.current !== undefined) ? pendingRgbBrightnessRef.current : (targetDev.brightness ?? 80);
+    const rgbMod = (rgbPendingFresh && pendingRgbModeRef.current) || targetDev.rgbMode || 'solid';
+
     let extraParams = '';
     if (devCode === 'rgb') {
-      const col = targetDev.color || '#FF6B00';
-      const bri = targetDev.brightness ?? 80;
-      const mod = targetDev.rgbMode || 'solid';
-      extraParams = `&color=${encodeURIComponent(col)}&b=${bri}&mode=${encodeURIComponent(mod)}`;
+      extraParams = `&color=${encodeURIComponent(rgbCol)}&b=${rgbBri}&mode=${encodeURIComponent(rgbMod)}`;
     }
 
     candidateIps.forEach(ip => {
@@ -1484,18 +1536,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     broadcastDeviceCommand(
       devCode,
       nextState,
-      devCode === 'rgb' ? {
-        color: targetDev.color || '#FF6B00',
-        b: targetDev.brightness ?? 80,
-        mode: targetDev.rgbMode || 'solid',
-      } : undefined
+      devCode === 'rgb' ? { color: rgbCol, b: rgbBri, mode: rgbMod } : undefined
     );
 
     // 2. Optimistic local React state update (Instant 0ms UI response)
     const autoOffStartedAt = newStatus === 'on' && targetDev.schedule?.autoOffEnabled ? new Date().toISOString() : null;
 
     setClassrooms(prev => prev.map(cls => {
-      if (cls.id !== classroomId) return cls;
+      if (cls.id !== effectiveClassroomId) return cls;
       const updatedDevices = cls.devices.map(dev => {
         if (dev.id !== deviceId) return dev;
         const sched = dev.schedule;
@@ -1539,7 +1587,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } 
     }]);
 
-    void supabase.from('classrooms').update({ current_load: newClsLoad }).eq('id', classroomId);
+    void supabase.from('classrooms').update({ current_load: newClsLoad }).eq('id', effectiveClassroomId);
 
     // 4. Manual override disarms Auto Mode so sensors don't fight user commands
     if (systemMode === 'auto') {
@@ -1556,19 +1604,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const targetDev = targetCls?.devices.find(d => d.id === deviceId);
     const effectiveClassroomId = targetCls?.id || classroomId;
 
+    const isRgbDevice = deviceId === 'dev-corr-rgb-strip' || deviceId.includes('rgb');
+
+    // For RGB strip, synchronously resolve the authoritative color, brightness and mode.
+    // Priority: explicit update -> in-flight ref (only while fresh, i.e. React state may still
+    // lag behind the user's last command) -> current device state.
+    const pendingFresh = Date.now() - lastRgbChangeRef.current < 5000;
+    const resolvedRgbColor = isRgbDevice
+      ? (updates.color || (pendingFresh ? pendingRgbColorRef.current : undefined) || targetDev?.color || '#FF6B00')
+      : updates.color;
+    const resolvedRgbBrightness = isRgbDevice
+      ? (updates.brightness !== undefined
+          ? updates.brightness
+          : ((pendingFresh && pendingRgbBrightnessRef.current !== undefined) ? pendingRgbBrightnessRef.current : (targetDev?.brightness ?? 80)))
+      : updates.brightness;
+    const resolvedRgbMode = isRgbDevice
+      ? (updates.rgbMode || (pendingFresh ? pendingRgbModeRef.current : undefined) || targetDev?.rgbMode || 'solid')
+      : updates.rgbMode;
+
+    if (isRgbDevice) {
+      lastRgbChangeRef.current = Date.now();
+      pendingRgbColorRef.current = resolvedRgbColor;
+      pendingRgbBrightnessRef.current = resolvedRgbBrightness;
+      pendingRgbModeRef.current = resolvedRgbMode;
+    }
+
+    const effectiveUpdates: Partial<Device> = isRgbDevice ? {
+      ...updates,
+      color: resolvedRgbColor,
+      brightness: resolvedRgbBrightness,
+      rgbMode: resolvedRgbMode,
+      mode: resolvedRgbMode,
+    } : updates;
+
     const mergedDev: Device | null = targetDev ? {
       ...targetDev,
-      ...updates,
+      ...effectiveUpdates,
       lastUpdated: new Date().toISOString(),
     } : null;
 
     const targetSettings = mergedDev ? deviceSettings(mergedDev) : null;
 
-    if (deviceId === 'dev-corr-rgb-strip' || deviceId.includes('rgb')) {
-      lastRgbChangeRef.current = Date.now();
-      if (updates.rgbMode) pendingRgbModeRef.current = updates.rgbMode;
-      if (updates.color) pendingRgbColorRef.current = updates.color;
-      if (updates.brightness !== undefined) pendingRgbBrightnessRef.current = updates.brightness;
+    if (updates.status !== undefined) {
+      lastUserToggleRef.current[deviceId] = Date.now();
+      pendingUserToggleStateRef.current[deviceId] = updates.status;
     }
 
     // 2. Immediate optimistic state update in React
@@ -1580,8 +1659,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (dev.id !== deviceId) return dev;
           return {
             ...dev,
-            ...updates,
-            ...(updates.rgbMode ? { rgbMode: updates.rgbMode, mode: updates.rgbMode } : {}),
+            ...effectiveUpdates,
+            ...(effectiveUpdates.rgbMode ? { rgbMode: effectiveUpdates.rgbMode, mode: effectiveUpdates.rgbMode } : {}),
             lastUpdated: new Date().toISOString(),
           };
         }),
@@ -1614,7 +1693,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     // 4. Instant LAN dispatch for WS2812B RGB Strip with active in-flight request abortion
-    if (deviceId === 'dev-corr-rgb-strip' || deviceId.includes('rgb')) {
+    if (isRgbDevice) {
       if (rgbFetchAbortRef.current) {
         rgbFetchAbortRef.current.abort();
       }
@@ -1633,26 +1712,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const cleanIp = ip.trim();
         const baseUrl = cleanIp.startsWith('http') ? cleanIp : `http://${cleanIp}`;
         let url = `${baseUrl}/ctrl?dev=rgb`;
-        if (updates.status !== undefined) url += `&st=${updates.status === 'on' ? '1' : '0'}`;
-        if (updates.color) url += `&color=${encodeURIComponent(updates.color)}`;
-        if (updates.brightness !== undefined) url += `&b=${updates.brightness}`;
-        const activeMode = updates.rgbMode || targetDev?.rgbMode;
-        if (activeMode) url += `&mode=${encodeURIComponent(activeMode)}`;
+        if (effectiveUpdates.status !== undefined) url += `&st=${effectiveUpdates.status === 'on' ? '1' : '0'}`;
+        if (resolvedRgbColor) url += `&color=${encodeURIComponent(resolvedRgbColor)}`;
+        if (resolvedRgbBrightness !== undefined) url += `&b=${resolvedRgbBrightness}`;
+        if (resolvedRgbMode) url += `&mode=${encodeURIComponent(resolvedRgbMode)}`;
 
         fetch(url, { signal: controller.signal }).catch(() => {});
       });
     }
 
     // 5. Sub-50ms Realtime WebSocket Broadcast to ESP32
-    const devCodeForBc = targetDev ? mapDeviceToEsp32Code(effectiveClassroomId, targetDev) : (deviceId.includes('rgb') ? 'rgb' : '');
+    const devCodeForBc = targetDev ? mapDeviceToEsp32Code(effectiveClassroomId, targetDev) : (isRgbDevice ? 'rgb' : '');
     if (devCodeForBc) {
       broadcastDeviceCommand(
         devCodeForBc,
-        updates.status ? updates.status === 'on' : (targetDev?.status === 'on'),
+        effectiveUpdates.status !== undefined ? effectiveUpdates.status === 'on' : (targetDev?.status === 'on'),
         devCodeForBc === 'rgb' ? {
-          color: updates.color ?? targetDev?.color,
-          b: updates.brightness ?? targetDev?.brightness,
-          mode: updates.rgbMode ?? targetDev?.rgbMode ?? 'solid',
+          color: resolvedRgbColor,
+          b: resolvedRgbBrightness,
+          mode: resolvedRgbMode,
         } : undefined
       );
     }
@@ -1927,23 +2005,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const targetDevices = classrooms
       .flatMap(c => c.devices)
       .filter(d => d.category === category && d.status !== 'offline');
-    const isAnyOn = targetDevices.some(d => d.status === 'on');
-    // If any are ON, master switch turns all OFF. If none are ON, turns all ON.
-    const newState = !isAnyOn;
+    const isAllOn = targetDevices.length > 0 && targetDevices.every(d => d.status === 'on');
+    // If all are already ON, master switch turns all OFF. Otherwise, turns all ON.
+    const newState = !isAllOn;
     const newStatus: DeviceStatus = newState ? 'on' : 'off';
     const nowMs = Date.now();
 
-    const sync: { id: string; data: Record<string, unknown> }[] = [];
+    const sync = targetDevices.map(dev => {
+      const rated = dev.ratedPower || (dev.category === 'fan' ? 75 : dev.category === 'light' ? 60 : 40);
+      const powerUsage = newStatus === 'off' ? 0 : rated;
+      const existingSettings = deviceSettings(dev);
+      existingSettings.ratedPower = rated;
+      lastUserToggleRef.current[dev.id] = nowMs;
+      pendingUserToggleStateRef.current[dev.id] = newStatus;
+      return { id: dev.id, data: { status: newStatus, power_usage: powerUsage, settings: existingSettings } };
+    });
+
     setClassrooms(prevCls => prevCls.map(cls => {
       const updatedDevices = cls.devices.map(dev => {
         if (dev.category !== category || dev.status === 'offline') return dev;
         const rated = dev.ratedPower || (dev.category === 'fan' ? 75 : dev.category === 'light' ? 60 : 40);
         const powerUsage = newStatus === 'off' ? 0 : rated;
-        const existingSettings = deviceSettings(dev);
-        existingSettings.ratedPower = rated;
-        sync.push({ id: dev.id, data: { status: newStatus, power_usage: powerUsage, settings: existingSettings } });
-        lastUserToggleRef.current[dev.id] = nowMs;
-        pendingUserToggleStateRef.current[dev.id] = newStatus;
         return { ...dev, status: newStatus, ratedPower: rated, powerUsage, lastUpdated: new Date().toISOString() };
       });
 
@@ -1970,56 +2052,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    const groupCode = control === 'allLights' ? 'all_lights' : control === 'allFans' ? 'all_fans' : 'all_curtains';
+
     candidateIps.forEach(ip => {
-      if (control === 'allLights') {
-        void sendEsp32Command(ip, 'l1', newState);
-        void sendEsp32Command(ip, 'l2', newState);
-        void sendEsp32Command(ip, 'cr1', newState);
-        void sendEsp32Command(ip, 'cr2', newState);
-        void sendEsp32Command(ip, 'rgb', newState);
-      } else if (control === 'allFans') {
-        void sendEsp32Command(ip, 'f1', newState);
-        void sendEsp32Command(ip, 'f2', newState);
-      } else if (control === 'allCurtains') {
-        void sendEsp32Command(ip, 'c1', newState);
-        void sendEsp32Command(ip, 'c2', newState);
-      }
+      void sendEsp32Command(ip, groupCode, newState);
     });
 
     // Sub-50ms Realtime WebSocket broadcast for group controls
-    if (control === 'allLights') {
-      broadcastDeviceCommand('l1', newState);
-      broadcastDeviceCommand('l2', newState);
-      broadcastDeviceCommand('cr1', newState);
-      broadcastDeviceCommand('cr2', newState);
-      broadcastDeviceCommand('rgb', newState);
-    } else if (control === 'allFans') {
-      broadcastDeviceCommand('f1', newState);
-      broadcastDeviceCommand('f2', newState);
-    } else if (control === 'allCurtains') {
-      broadcastDeviceCommand('c1', newState);
-      broadcastDeviceCommand('c2', newState);
-    }
+    broadcastDeviceCommand(groupCode, newState);
 
     if (systemMode === 'auto') {
       void setSystemMode('manual');
       showToast('Manual Override: Switched to MANUAL Mode', 'info');
+    } else {
+      const label = control === 'allLights' ? 'All Lights' : control === 'allFans' ? 'All Fans' : 'All Curtains';
+      showToast(`${label} turned ${newStatus.toUpperCase()}`, 'info');
     }
   }, [broadcastDeviceCommand, classrooms, esp32Ip, setSystemMode, showToast, syncDevices, systemMode]);
 
   const emergencyOff = useCallback(() => {
-    const sync: { id: string; data: Record<string, unknown> }[] = [];
     const nowMs = Date.now();
+    const allOnlineDevices = classrooms.flatMap(c => c.devices).filter(d => d.status !== 'offline');
+    const sync = allOnlineDevices.map(dev => {
+      const existingSettings = deviceSettings(dev);
+      existingSettings.ratedPower = dev.ratedPower;
+      lastUserToggleRef.current[dev.id] = nowMs;
+      pendingUserToggleStateRef.current[dev.id] = 'off';
+      return { id: dev.id, data: { status: 'off' as const, power_usage: 0, settings: existingSettings } };
+    });
+
     setClassrooms(prev => prev.map(cls => ({
       ...cls,
       currentLoad: 0,
       devices: cls.devices.map(dev => {
         if (dev.status === 'offline') return dev;
-        const existingSettings = deviceSettings(dev);
-        existingSettings.ratedPower = dev.ratedPower;
-        sync.push({ id: dev.id, data: { status: 'off' as const, power_usage: 0, settings: existingSettings } });
-        lastUserToggleRef.current[dev.id] = nowMs;
-        pendingUserToggleStateRef.current[dev.id] = 'off';
         return {
           ...dev,
           status: 'off' as const,

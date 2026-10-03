@@ -237,4 +237,12 @@ const float WATTS_CORR_LIGHT = 40.0;
 const float WATTS_SERVO_ACTIVE = 5.0;
 const float WATTS_WS2812_STRIP = 4.5; // 15x WS2812B LEDs @ ~0.3W peak = ~4.5W
 
+// ==========================================
+// --- MUSICAL NOTES & CHIME STRUCTURE ---
+// ==========================================
+struct BuzzerNote {
+  uint16_t freqHz;
+  uint16_t durationMs;
+};
+
 #endif // CONFIG_H

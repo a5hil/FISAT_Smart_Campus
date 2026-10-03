@@ -82,6 +82,25 @@ Servo curtain1;
 Servo curtain2;
 Preferences preferences;
 
+// FreeRTOS Mutexes & Spinlocks for Thread-Safe Dual-Core Execution
+SemaphoreHandle_t noticeMutex = NULL;
+SemaphoreHandle_t nvsMutex = NULL;
+portMUX_TYPE syncMaskMux = portMUX_INITIALIZER_UNLOCKED;
+
+inline bool lockNotices(TickType_t ticks = pdMS_TO_TICKS(150)) {
+  return noticeMutex ? (xSemaphoreTake(noticeMutex, ticks) == pdTRUE) : true;
+}
+inline void unlockNotices() {
+  if (noticeMutex) xSemaphoreGive(noticeMutex);
+}
+
+inline bool lockNVS(TickType_t ticks = pdMS_TO_TICKS(200)) {
+  return nvsMutex ? (xSemaphoreTake(nvsMutex, ticks) == pdTRUE) : true;
+}
+inline void unlockNVS() {
+  if (nvsMutex) xSemaphoreGive(nvsMutex);
+}
+
 // ==========================================
 // --- MUSICAL NOTES & PIEZO AUDIO DRIVER ---
 // ==========================================
@@ -109,10 +128,7 @@ Preferences preferences;
 #define NOTE_B6  1976
 #define REST     0
 
-struct BuzzerNote {
-  uint16_t freqHz;
-  uint16_t durationMs;
-};
+// struct BuzzerNote declared in config.h
 
 #define MAX_CHIME_NOTES 48
 BuzzerNote chimeNotes[MAX_CHIME_NOTES];
@@ -489,11 +505,18 @@ bool parseTimetableJson(const String& jsonStr) {
 }
 
 void saveTimetableToNVS(const String& jsonStr) {
-  preferences.putString("tt_json", jsonStr);
+  if (lockNVS()) {
+    preferences.putString("tt_json", jsonStr);
+    unlockNVS();
+  }
 }
 
 void loadTimetableFromNVS() {
-  String jsonStr = preferences.getString("tt_json", "");
+  String jsonStr = "";
+  if (lockNVS()) {
+    jsonStr = preferences.getString("tt_json", "");
+    unlockNVS();
+  }
   if (jsonStr.length() > 10) {
     if (!parseTimetableJson(jsonStr)) {
       loadDefaultTimetable();
@@ -610,6 +633,7 @@ volatile bool state_corr2_light = false;
 
 // WS2812B Addressable LED Strip State (Corridor Zone, 15 LEDs, GPIO 5)
 volatile bool state_ws2812 = false;
+volatile bool ws2812_needs_update = false;
 String ws2812_color = WS2812_DEFAULT_COLOR;
 int ws2812_brightness = WS2812_DEFAULT_BRIGHTNESS; // 0-255
 String ws2812_mode = "solid";                      // "solid", "breathe", "rainbow", "strobe"
@@ -621,6 +645,7 @@ unsigned long lastWs2812LocalChange = 0;
 // Display States for Classroom 1 (A101)
 volatile bool state_c1_smart_screen = true;   // Primary OLED (Telemetry Display on Wire)
 volatile bool state_c1_notice_screen = true;  // Secondary OLED (Notice Board on Wire1)
+volatile bool pendingNoticeBeep = false;      // Decouples Core 0 cloud sync from Core 1 audio PWM
 
 // Cloud State Tracking (Prevents stale DB polls from overriding local sensor
 // actions)
@@ -683,6 +708,9 @@ FirmwareDeviceSchedule deviceSchedules[NUM_SCHEDULED_DEVICES] = {
 // Queue for asynchronous background cloud sync of device state changes
 volatile uint16_t pendingDeviceCloudSyncMask = 0;
 
+// Local device actuation timestamp array: shields each device against stale cloud poll echoes
+unsigned long lastLocalDeviceControlMs[NUM_SCHEDULED_DEVICES] = {0};
+
 int getDeviceScheduleIndex(const String& devId) {
   String d = devId;
   d.toLowerCase();
@@ -696,7 +724,7 @@ int getDeviceScheduleIndex(const String& devId) {
   if (d == "c2" || d == "curtain2" || d.indexOf("a102-curtain") >= 0) return 7;
   if (d == "cr1" || d == "corr1" || d.indexOf("corr-light1") >= 0 || d.indexOf("corr-light-1") >= 0) return 8;
   if (d == "cr2" || d == "corr2" || d.indexOf("corr-light2") >= 0 || d.indexOf("corr-light-2") >= 0) return 9;
-  if (d == "rgb" || d == "ws2812" || d.indexOf("rgb-strip") >= 0) return 10;
+  if (d == "rgb" || d == "ws2812" || d.indexOf("rgb") >= 0 || d.indexOf("strip") >= 0) return 10;
   return -1;
 }
 
@@ -732,7 +760,9 @@ void queueDeviceCloudSync(int idx, bool isOn) {
   else if (idx == 9) cloud_prev_corr2_light = isOn;
   else if (idx == 10) cloud_prev_ws2812 = isOn;
 
+  portENTER_CRITICAL(&syncMaskMux);
   pendingDeviceCloudSyncMask |= (1 << idx);
+  portEXIT_CRITICAL(&syncMaskMux);
 }
 
 bool parseDeviceSchedule(int idx, JsonVariantConst sObj) {
@@ -780,14 +810,21 @@ bool parseDeviceSchedule(int idx, JsonVariantConst sObj) {
 
 void saveDeviceScheduleToNVS(int idx, const String& jsonStr) {
   if (idx < 0 || idx >= NUM_SCHEDULED_DEVICES) return;
-  preferences.putString(deviceSchedules[idx].nvsKey, jsonStr);
+  if (lockNVS()) {
+    preferences.putString(deviceSchedules[idx].nvsKey, jsonStr);
+    unlockNVS();
+  }
 }
 
 void loadDeviceSchedulesFromNVS() {
   Serial.println(F("[SCHEDULE] Loading persistent device schedules from NVS flash..."));
   int loadedCount = 0;
   for (int i = 0; i < NUM_SCHEDULED_DEVICES; i++) {
-    String stored = preferences.getString(deviceSchedules[i].nvsKey, "");
+    String stored = "";
+    if (lockNVS()) {
+      stored = preferences.getString(deviceSchedules[i].nvsKey, "");
+      unlockNVS();
+    }
     if (stored.length() > 5) {
       StaticJsonDocument<512> doc;
       DeserializationError err = deserializeJson(doc, stored);
@@ -887,32 +924,43 @@ void checkAutoOffTimers() {
 // OLED Hardware flag
 bool oledFound = false;
 
-void setSmartScreenPower(bool on) {
-  state_c1_smart_screen = on;
-  if (oledFound) {
-    if (on) {
+void syncDisplayPowerStates() {
+  static int hw_smart_screen = -1;
+  static int hw_notice_screen = -1;
+
+  int target_smart = state_c1_smart_screen ? 1 : 0;
+  if (oledFound && hw_smart_screen != target_smart) {
+    hw_smart_screen = target_smart;
+    if (target_smart == 1) {
       display.ssd1306_command(SSD1306_DISPLAYON);
     } else {
       display.clearDisplay();
       display.display();
       display.ssd1306_command(SSD1306_DISPLAYOFF);
     }
+    Serial.printf("[DISPLAY] Smart Screen (Telemetry) -> %s\n", target_smart ? "ON" : "OFF");
   }
-  Serial.printf("[DISPLAY] Smart Screen (Telemetry) -> %s\n", on ? "ON" : "OFF");
-}
 
-void setNoticeScreenPower(bool on) {
-  state_c1_notice_screen = on;
-  if (noticeOledFound) {
-    if (on) {
+  int target_notice = state_c1_notice_screen ? 1 : 0;
+  if (noticeOledFound && hw_notice_screen != target_notice) {
+    hw_notice_screen = target_notice;
+    if (target_notice == 1) {
       displayNotice.ssd1306_command(SSD1306_DISPLAYON);
     } else {
       displayNotice.clearDisplay();
       displayNotice.display();
       displayNotice.ssd1306_command(SSD1306_DISPLAYOFF);
     }
+    Serial.printf("[DISPLAY] Notice Board Screen -> %s\n", target_notice ? "ON" : "OFF");
   }
-  Serial.printf("[DISPLAY] Notice Board Screen -> %s\n", on ? "ON" : "OFF");
+}
+
+void setSmartScreenPower(bool on) {
+  state_c1_smart_screen = on;
+}
+
+void setNoticeScreenPower(bool on) {
+  state_c1_notice_screen = on;
 }
 
 // Dynamic Wi-Fi Provisioning & AP Setup Mode flags
@@ -1113,8 +1161,11 @@ void integrateRealEnergy() {
   // Periodic persistence to ESP32 Flash (every 5 minutes)
   if (now - lastEnergySaveNvsMs >= 300000) {
     lastEnergySaveNvsMs = now;
-    preferences.putFloat("c1_kwh", (float)c1_accumulated_kwh);
-    preferences.putFloat("c2_kwh", (float)c2_accumulated_kwh);
+    if (lockNVS()) {
+      preferences.putFloat("c1_kwh", (float)c1_accumulated_kwh);
+      preferences.putFloat("c2_kwh", (float)c2_accumulated_kwh);
+      unlockNVS();
+    }
   }
 }
 
@@ -1179,7 +1230,10 @@ void setSystemModeInternal(bool autoMode, bool notifyCloud) {
   if (isAutoMode != autoMode) {
     isAutoMode = autoMode;
     cloud_prev_system_auto = autoMode;
-    preferences.putBool("auto_mode", autoMode);
+    if (lockNVS()) {
+      preferences.putBool("auto_mode", autoMode);
+      unlockNVS();
+    }
     if (notifyCloud) {
       pendingModeCloudSync = true;
       lastLocalModeChange = millis();
@@ -1261,6 +1315,15 @@ uint32_t parseHexColor(const String &hexStr) {
   String h = hexStr;
   h.replace("#", "");
   h.trim();
+  if (h.length() == 3) {
+    char rHex[3] = { h[0], h[0], '\0' };
+    char gHex[3] = { h[1], h[1], '\0' };
+    char bHex[3] = { h[2], h[2], '\0' };
+    uint8_t r = strtol(rHex, NULL, 16);
+    uint8_t g = strtol(gHex, NULL, 16);
+    uint8_t b = strtol(bHex, NULL, 16);
+    return strip.Color(r, g, b);
+  }
   if (h.length() != 6) {
     return strip.Color(255, 107, 0); // fallback warm amber
   }
@@ -1279,8 +1342,10 @@ void updateWs2812Strip() {
     return;
   }
 
-  if (ws2812_brightness < 20) {
+  if (ws2812_brightness <= 0) {
     ws2812_brightness = WS2812_DEFAULT_BRIGHTNESS;
+  } else {
+    ws2812_brightness = constrain(ws2812_brightness, 5, 255);
   }
   strip.setBrightness(ws2812_brightness);
 
@@ -1301,7 +1366,29 @@ void updateWs2812Strip() {
   strip.show();
 }
 
+void syncWs2812Hardware() {
+  static bool last_applied_state = false;
+  static String last_applied_color = "";
+  static int last_applied_brightness = -1;
+  static String last_applied_mode = "";
+
+  bool stateChanged = (state_ws2812 != last_applied_state);
+  bool settingsChanged = (ws2812_color != last_applied_color || 
+                          ws2812_brightness != last_applied_brightness || 
+                          ws2812_mode != last_applied_mode);
+
+  if (ws2812_needs_update || stateChanged || (state_ws2812 && settingsChanged)) {
+    ws2812_needs_update = false;
+    last_applied_state = state_ws2812;
+    last_applied_color = ws2812_color;
+    last_applied_brightness = ws2812_brightness;
+    last_applied_mode = ws2812_mode;
+    updateWs2812Strip();
+  }
+}
+
 void updateWs2812Animation() {
+  syncWs2812Hardware();
   if (!state_ws2812) return;
 
   unsigned long now = millis();
@@ -1311,12 +1398,18 @@ void updateWs2812Animation() {
       last_ws2812_anim_ms = now;
       ws2812_anim_step = (ws2812_anim_step + 4) % 360;
       float rad = ws2812_anim_step * (3.14159265f / 180.0f);
-      float factor = 0.25f + 0.75f * (0.5f + 0.5f * sin(rad));
-      int effB = (int)(ws2812_brightness * factor);
-      strip.setBrightness(constrain(effB, 10, 255));
-      uint32_t c = parseHexColor(ws2812_color);
+      // Smooth sinusoidal breathing factor (20% to 100%)
+      float factor = 0.20f + 0.80f * (0.5f + 0.5f * sin(rad));
+      
+      uint32_t baseColor = parseHexColor(ws2812_color);
+      uint8_t r = (uint8_t)(((baseColor >> 16) & 0xFF) * factor);
+      uint8_t g = (uint8_t)(((baseColor >> 8) & 0xFF) * factor);
+      uint8_t b = (uint8_t)((baseColor & 0xFF) * factor);
+      uint32_t scaledColor = strip.Color(r, g, b);
+
+      strip.setBrightness(ws2812_brightness);
       for (int i = 0; i < WS2812_NUM_LEDS; i++) {
-        strip.setPixelColor(i, c);
+        strip.setPixelColor(i, scaledColor);
       }
       strip.show();
     }
@@ -1324,7 +1417,6 @@ void updateWs2812Animation() {
     if (now - last_ws2812_anim_ms >= 25) {
       last_ws2812_anim_ms = now;
       ws2812_anim_step = (ws2812_anim_step + 256) % 65536;
-      strip.setBrightness(ws2812_brightness);
       for (int i = 0; i < WS2812_NUM_LEDS; i++) {
         int pixelHue = (ws2812_anim_step + (i * 65536L / WS2812_NUM_LEDS)) % 65536;
         strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue)));
@@ -1335,7 +1427,6 @@ void updateWs2812Animation() {
     if (now - last_ws2812_anim_ms >= 150) {
       last_ws2812_anim_ms = now;
       ws2812_strobe_state = !ws2812_strobe_state;
-      strip.setBrightness(ws2812_brightness);
       if (ws2812_strobe_state) {
         uint32_t c = parseHexColor(ws2812_color);
         for (int i = 0; i < WS2812_NUM_LEDS; i++) {
@@ -1350,7 +1441,6 @@ void updateWs2812Animation() {
     if (now - last_ws2812_anim_ms >= 45) {
       last_ws2812_anim_ms = now;
       ws2812_anim_step = (ws2812_anim_step + 1) % WS2812_NUM_LEDS;
-      strip.setBrightness(ws2812_brightness);
       uint32_t c = parseHexColor(ws2812_color);
       for (int i = 0; i < WS2812_NUM_LEDS; i++) {
         if (i == ws2812_anim_step || i == (ws2812_anim_step + 1) % WS2812_NUM_LEDS) {
@@ -1371,15 +1461,13 @@ void updateWs2812Animation() {
         int b1 = constrain(10 - (flicker / 2), 0, 255);
         strip.setPixelColor(i, strip.Color(r1, g1, b1));
       }
-      strip.setBrightness(ws2812_brightness);
       strip.show();
     }
   } else {
-    // Mode "solid" or default: periodically refresh strip every 1.5 seconds to guarantee LEDs stay driven
+    // Mode "solid" or default: conservative keep-alive refresh every 30s for noise resilience
     static unsigned long lastSolidRefresh = 0;
-    if (now - lastSolidRefresh >= 1500) {
+    if (now - lastSolidRefresh >= 30000UL) {
       lastSolidRefresh = now;
-      strip.setBrightness(ws2812_brightness);
       uint32_t c = parseHexColor(ws2812_color);
       for (int i = 0; i < WS2812_NUM_LEDS; i++) {
         strip.setPixelColor(i, c);
@@ -1396,9 +1484,13 @@ void handleApiRgb() {
     return;
   }
 
+  bool st = state_ws2812;
+  bool stateProvided = false;
+
   if (server.hasArg("state") || server.hasArg("st")) {
     String stVal = server.hasArg("state") ? server.arg("state") : server.arg("st");
-    state_ws2812 = (stVal == "1" || stVal == "true" || stVal == "on");
+    st = (stVal == "1" || stVal == "true" || stVal == "on");
+    stateProvided = true;
   }
 
   if (server.hasArg("color")) {
@@ -1415,14 +1507,18 @@ void handleApiRgb() {
     ws2812_mode = server.arg("mode");
     last_ws2812_anim_ms = 0;
     lastWs2812LocalChange = millis();
+  } else if (server.hasArg("rgbMode")) {
+    ws2812_mode = server.arg("rgbMode");
+    last_ws2812_anim_ms = 0;
+    lastWs2812LocalChange = millis();
   }
 
   if (server.hasArg("plain")) {
     StaticJsonDocument<256> doc;
     DeserializationError err = deserializeJson(doc, server.arg("plain"));
     if (!err) {
-      if (doc.containsKey("state")) state_ws2812 = doc["state"].as<bool>();
-      if (doc.containsKey("st")) state_ws2812 = doc["st"].as<bool>();
+      if (doc.containsKey("state")) { st = doc["state"].as<bool>(); stateProvided = true; }
+      if (doc.containsKey("st")) { st = doc["st"].as<bool>(); stateProvided = true; }
       if (doc.containsKey("color")) ws2812_color = doc["color"].as<String>();
       if (doc.containsKey("brightness")) {
         int bPct = doc["brightness"].as<int>();
@@ -1444,7 +1540,9 @@ void handleApiRgb() {
     }
   }
 
-  updateWs2812Strip();
+  // If power state was explicitly provided or strip is being modified, route through applyDeviceControl
+  lastWs2812LocalChange = millis();
+  applyDeviceControl("rgb", stateProvided ? st : state_ws2812);
 
   int bPctOut = (int)round((ws2812_brightness * 100.0) / 255.0);
   String resp = "{\"status\":\"ok\",\"device\":\"dev-corr-rgb-strip\",\"power\":";
@@ -1494,6 +1592,7 @@ void handleNotFound() {
 // fields)
 String buildStatusJson(bool includeTelemetry = true) {
   String json = "{";
+  json.reserve(2048);
   json += "\"status\":\"ok\",";
   json += "\"mode\":\"" + String(isAutoMode ? "auto" : "manual") + "\",";
   json += "\"temperature\":" + String(currentTemp, 1) + ",";
@@ -1617,9 +1716,10 @@ void handleMode() {
 void applyDeviceControl(String dev, bool st) {
   dev.toLowerCase();
 
-  // Track turn-on timestamp for onboard auto-off countdown timer
+  // Track turn-on timestamp for onboard auto-off countdown timer & anti-echo shield
   int schedIdx = getDeviceScheduleIndex(dev);
   if (schedIdx >= 0) {
+    lastLocalDeviceControlMs[schedIdx] = millis();
     if (st) {
       deviceSchedules[schedIdx].turnOnTimestampMs = millis();
     } else {
@@ -1674,7 +1774,60 @@ void applyDeviceControl(String dev, bool st) {
              dev == "dev-corr-rgb-strip") {
     state_ws2812 = st;
     cloud_prev_ws2812 = st;
+    lastWs2812LocalChange = millis();
     updateWs2812Strip();
+  }
+  // Group Commands (Atomic actuation of all devices in a category)
+  else if (dev == "all_lights" || dev == "all-lights" || dev == "lights") {
+    state_c1_light = st;
+    state_c2_light = st;
+    state_corr1_light = st;
+    state_corr2_light = st;
+    state_ws2812 = st;
+    updateWs2812Strip();
+
+    cloud_prev_c1_light = st;
+    cloud_prev_c2_light = st;
+    cloud_prev_corr1_light = st;
+    cloud_prev_corr2_light = st;
+    cloud_prev_ws2812 = st;
+
+    unsigned long nowMs = millis();
+    int lightIndices[] = {0, 5, 8, 9, 10};
+    for (int idx : lightIndices) {
+      lastLocalDeviceControlMs[idx] = nowMs;
+      deviceSchedules[idx].turnOnTimestampMs = st ? nowMs : 0;
+    }
+    lastWs2812LocalChange = nowMs;
+    Serial.printf("[GROUP CONTROL] All Lights -> %s\n", st ? "ON" : "OFF");
+  } else if (dev == "all_fans" || dev == "all-fans" || dev == "fans") {
+    state_c1_fan = st;
+    state_c2_fan = st;
+
+    cloud_prev_c1_fan = st;
+    cloud_prev_c2_fan = st;
+
+    unsigned long nowMs = millis();
+    int fanIndices[] = {1, 6};
+    for (int idx : fanIndices) {
+      lastLocalDeviceControlMs[idx] = nowMs;
+      deviceSchedules[idx].turnOnTimestampMs = st ? nowMs : 0;
+    }
+    Serial.printf("[GROUP CONTROL] All Fans -> %s\n", st ? "ON" : "OFF");
+  } else if (dev == "all_curtains" || dev == "all-curtains" || dev == "curtains") {
+    state_c1_curtain = st;
+    state_c2_curtain = st;
+
+    cloud_prev_c1_curtain = st;
+    cloud_prev_c2_curtain = st;
+
+    unsigned long nowMs = millis();
+    int curtainIndices[] = {2, 7};
+    for (int idx : curtainIndices) {
+      lastLocalDeviceControlMs[idx] = nowMs;
+      deviceSchedules[idx].turnOnTimestampMs = st ? nowMs : 0;
+    }
+    Serial.printf("[GROUP CONTROL] All Curtains -> %s\n", st ? "OPEN" : "CLOSED");
   }
   // Bulk / Emergency Commands
   else if (dev == "all" || dev == "emergency") {
@@ -1703,6 +1856,13 @@ void applyDeviceControl(String dev, bool st) {
     cloud_prev_ws2812 = st;
     cloud_prev_c1_notice_board = st;
     cloud_prev_c1_smart_screen = st;
+
+    unsigned long nowMs = millis();
+    for (int i = 0; i < NUM_SCHEDULED_DEVICES; i++) {
+      lastLocalDeviceControlMs[i] = nowMs;
+      deviceSchedules[i].turnOnTimestampMs = st ? nowMs : 0;
+    }
+    lastWs2812LocalChange = nowMs;
   }
 
   // Instantly apply relay pin states
@@ -1722,6 +1882,7 @@ void handleControl() {
     }
 
     if (dev == "rgb" || dev == "ws2812" || dev == "rgb_strip" || dev == "dev-corr-rgb-strip") {
+      lastWs2812LocalChange = millis();
       if (server.hasArg("color")) {
         ws2812_color = server.arg("color");
       }
@@ -1736,11 +1897,9 @@ void handleControl() {
       if (server.hasArg("mode")) {
         ws2812_mode = server.arg("mode");
         last_ws2812_anim_ms = 0;
-        lastWs2812LocalChange = millis();
       } else if (server.hasArg("rgbMode")) {
         ws2812_mode = server.arg("rgbMode");
         last_ws2812_anim_ms = 0;
-        lastWs2812LocalChange = millis();
       }
     }
 
@@ -1784,6 +1943,7 @@ void handleControl() {
       }
 
       if (dev == "rgb" || dev == "ws2812" || dev == "rgb_strip" || dev == "dev-corr-rgb-strip") {
+        lastWs2812LocalChange = millis();
         if (doc.containsKey("color")) ws2812_color = doc["color"].as<String>();
         if (doc.containsKey("brightness")) {
           int b = doc["brightness"].as<int>();
@@ -1795,11 +1955,9 @@ void handleControl() {
         if (doc.containsKey("mode")) {
           ws2812_mode = doc["mode"].as<String>();
           last_ws2812_anim_ms = 0;
-          lastWs2812LocalChange = millis();
         } else if (doc.containsKey("rgbMode")) {
           ws2812_mode = doc["rgbMode"].as<String>();
           last_ws2812_anim_ms = 0;
-          lastWs2812LocalChange = millis();
         }
       }
     } else {
@@ -1860,35 +2018,37 @@ void handleConfig() {
   if (server.hasArg("hold_sec")) {
     currentHoldTime = server.arg("hold_sec").toInt() * 1000UL;
   }
+  bool nvsLocked = lockNVS();
   if (server.hasArg("c1_light_w")) {
     rated_c1_light = server.arg("c1_light_w").toFloat();
-    preferences.putFloat("r_c1_l", rated_c1_light);
+    if (nvsLocked) preferences.putFloat("r_c1_l", rated_c1_light);
   }
   if (server.hasArg("c1_fan_w")) {
     rated_c1_fan = server.arg("c1_fan_w").toFloat();
-    preferences.putFloat("r_c1_f", rated_c1_fan);
+    if (nvsLocked) preferences.putFloat("r_c1_f", rated_c1_fan);
   }
   if (server.hasArg("c2_light_w")) {
     rated_c2_light = server.arg("c2_light_w").toFloat();
-    preferences.putFloat("r_c2_l", rated_c2_light);
+    if (nvsLocked) preferences.putFloat("r_c2_l", rated_c2_light);
   }
   if (server.hasArg("c2_fan_w")) {
     rated_c2_fan = server.arg("c2_fan_w").toFloat();
-    preferences.putFloat("r_c2_f", rated_c2_fan);
+    if (nvsLocked) preferences.putFloat("r_c2_f", rated_c2_fan);
   }
   if (server.hasArg("corr1_w")) {
     rated_corr1 = server.arg("corr1_w").toFloat();
-    preferences.putFloat("r_cr1", rated_corr1);
+    if (nvsLocked) preferences.putFloat("r_cr1", rated_corr1);
   }
   if (server.hasArg("corr2_w")) {
     rated_corr2 = server.arg("corr2_w").toFloat();
-    preferences.putFloat("r_cr2", rated_corr2);
+    if (nvsLocked) preferences.putFloat("r_cr2", rated_corr2);
   }
   if (server.hasArg("ws2812_w") || server.hasArg("rgb_w")) {
     String wArg = server.hasArg("ws2812_w") ? server.arg("ws2812_w") : server.arg("rgb_w");
     rated_ws2812 = wArg.toFloat();
-    preferences.putFloat("r_ws2812", rated_ws2812);
+    if (nvsLocked) preferences.putFloat("r_ws2812", rated_ws2812);
   }
+  if (nvsLocked) unlockNVS();
 
   String json = "{";
   json += "\"status\":\"ok\",";
@@ -1975,8 +2135,11 @@ void handleSaveWiFi() {
     return;
   }
 
-  preferences.putString("wifi_ssid", ssid);
-  preferences.putString("wifi_pass", pass);
+  if (lockNVS()) {
+    preferences.putString("wifi_ssid", ssid);
+    preferences.putString("wifi_pass", pass);
+    unlockNVS();
+  }
 
   String html = F("<!DOCTYPE html><html><head><meta charset='UTF-8'>"
                   "<meta name='viewport' content='width=device-width,initial-scale=1.0'>"
@@ -2039,8 +2202,11 @@ void handleApiWiFi() {
     return;
   }
 
-  preferences.putString("wifi_ssid", ssid);
-  preferences.putString("wifi_pass", pass);
+  if (lockNVS()) {
+    preferences.putString("wifi_ssid", ssid);
+    preferences.putString("wifi_pass", pass);
+    unlockNVS();
+  }
 
   server.send(200, "application/json",
               "{\"status\":\"ok\",\"message\":\"Wi-Fi credentials saved. Restarting controller...\",\"ssid\":\"" + ssid + "\"}");
@@ -2084,6 +2250,7 @@ void handleResetWiFi() {
 // --- DIGITAL NOTICE BOARD LOGIC (Wire1 / GPIO 13 & 15) ---
 // ==========================================
 void cleanExpiredNotices() {
+  if (!lockNotices()) return;
   unsigned long now = millis();
   for (int i = 0; i < noticeCount; i++) {
     if (notices[i].active && notices[i].durationMs > 0) {
@@ -2104,6 +2271,7 @@ void cleanExpiredNotices() {
     }
   }
   noticeCount = writeIdx;
+  unlockNotices();
 }
 
 // Forward declarations for NVS persistence
@@ -2111,56 +2279,66 @@ void saveNoticesToNVS();
 void loadNoticesFromNVS();
 
 void saveNoticesToNVS() {
+  if (!lockNVS()) return;
   StaticJsonDocument<2048> doc;
   JsonArray arr = doc.to<JsonArray>();
-  for (int i = 0; i < noticeCount; i++) {
-    if (notices[i].active) {
-      JsonObject obj = arr.createNestedObject();
-      obj["id"] = notices[i].id;
-      obj["cls"] = notices[i].classroomId;
-      obj["t"] = notices[i].title;
-      obj["m"] = notices[i].message;
-      obj["d"] = notices[i].duration;
+  if (lockNotices()) {
+    for (int i = 0; i < noticeCount; i++) {
+      if (notices[i].active) {
+        JsonObject obj = arr.createNestedObject();
+        obj["id"] = notices[i].id;
+        obj["cls"] = notices[i].classroomId;
+        obj["t"] = notices[i].title;
+        obj["m"] = notices[i].message;
+        obj["d"] = notices[i].duration;
+      }
     }
+    unlockNotices();
   }
   String out;
   serializeJson(doc, out);
   preferences.putString("notices_json", out);
+  unlockNVS();
   Serial.printf("[NVS] Saved %d notices to persistent flash memory.\n", arr.size());
 }
 
 void loadNoticesFromNVS() {
+  if (!lockNVS()) return;
   String stored = preferences.getString("notices_json", "");
+  unlockNVS();
   if (stored.length() > 5) {
     StaticJsonDocument<2048> doc;
     DeserializationError err = deserializeJson(doc, stored);
     if (!err && doc.is<JsonArray>()) {
-      noticeCount = 0;
-      for (JsonObject obj : doc.as<JsonArray>()) {
-        const char* id = obj["id"];
-        const char* cls = obj["cls"];
-        const char* t = obj["t"];
-        const char* m = obj["m"];
-        const char* d = obj["d"];
-        if (id && t && m && noticeCount < MAX_FIRMWARE_NOTICES) {
-          notices[noticeCount].id = String(id);
-          notices[noticeCount].classroomId = cls ? String(cls) : "all";
-          notices[noticeCount].title = String(t);
-          notices[noticeCount].message = String(m);
-          notices[noticeCount].duration = d ? String(d) : "24h";
+      if (lockNotices()) {
+        noticeCount = 0;
+        for (JsonObject obj : doc.as<JsonArray>()) {
+          const char* id = obj["id"];
+          const char* cls = obj["cls"];
+          const char* t = obj["t"];
+          const char* m = obj["m"];
+          const char* d = obj["d"];
+          if (id && t && m && noticeCount < MAX_FIRMWARE_NOTICES) {
+            notices[noticeCount].id = String(id);
+            notices[noticeCount].classroomId = cls ? String(cls) : "all";
+            notices[noticeCount].title = String(t);
+            notices[noticeCount].message = String(m);
+            notices[noticeCount].duration = d ? String(d) : "24h";
 
-          String durStr = notices[noticeCount].duration;
-          durStr.toLowerCase();
-          if (durStr == "1h") notices[noticeCount].durationMs = 3600000UL;
-          else if (durStr == "24h" || durStr == "1d") notices[noticeCount].durationMs = 86400000UL;
-          else notices[noticeCount].durationMs = 0;
+            String durStr = notices[noticeCount].duration;
+            durStr.toLowerCase();
+            if (durStr == "1h") notices[noticeCount].durationMs = 3600000UL;
+            else if (durStr == "24h" || durStr == "1d") notices[noticeCount].durationMs = 86400000UL;
+            else notices[noticeCount].durationMs = 0;
 
-          notices[noticeCount].createdAtMs = millis();
-          notices[noticeCount].active = true;
-          noticeCount++;
+            notices[noticeCount].createdAtMs = millis();
+            notices[noticeCount].active = true;
+            noticeCount++;
+          }
         }
+        unlockNotices();
+        Serial.printf("[NOTICE] Restored %d persistent notices from NVS flash memory.\n", noticeCount);
       }
-      Serial.printf("[NOTICE] Restored %d persistent notices from NVS flash memory.\n", noticeCount);
     }
   }
 }
@@ -2176,6 +2354,8 @@ void addOrUpdateNotice(String id, String clsId, String title, String msg, String
   } else {
     durMs = 0; // "never" / until manually deleted
   }
+
+  if (!lockNotices()) return;
 
   // Check if notice with this id already exists (update in place)
   for (int i = 0; i < noticeCount; i++) {
@@ -2194,6 +2374,7 @@ void addOrUpdateNotice(String id, String clsId, String title, String msg, String
         triggerNoticeBeep();
       }
       currentNoticeDisplayIndex = i;
+      unlockNotices();
       if (saveNvs) saveNoticesToNVS();
       Serial.printf("[NOTICE] Updated notice '%s' (Target: %s)\n", title.c_str(), clsId.c_str());
       return;
@@ -2229,6 +2410,8 @@ void addOrUpdateNotice(String id, String clsId, String title, String msg, String
     notices[lastIdx].active = true;
     targetIdx = lastIdx;
   }
+  unlockNotices();
+
   if (triggerPopup) {
     newNoticePopupUntilMs = millis() + 15000UL;
     activeNoticePopupIndex = targetIdx;
@@ -2242,6 +2425,7 @@ void addOrUpdateNotice(String id, String clsId, String title, String msg, String
 }
 
 bool deleteNoticeById(String id) {
+  if (!lockNotices()) return false;
   for (int i = 0; i < noticeCount; i++) {
     if (notices[i].id == id) {
       for (int j = i; j < noticeCount - 1; j++) {
@@ -2256,11 +2440,13 @@ bool deleteNoticeById(String id) {
       } else if (activeNoticePopupIndex > i) {
         activeNoticePopupIndex--;
       }
+      unlockNotices();
       saveNoticesToNVS();
       Serial.printf("[NOTICE] Deleted notice id '%s'\n", id.c_str());
       return true;
     }
   }
+  unlockNotices();
   return false;
 }
 
@@ -2480,19 +2666,33 @@ void updateNoticeBoardDisplay() {
   // Find notices targeted to Classroom A101 (or "all")
   int eligibleIndices[MAX_FIRMWARE_NOTICES];
   int eligibleCount = 0;
-  for (int i = 0; i < noticeCount; i++) {
-    if (notices[i].active) {
-      String cId = notices[i].classroomId;
-      cId.toLowerCase();
-      if (cId == "all" || cId.length() == 0 ||
-          cId == "cls-a101" || cId == "a101" || cId == CLASSROOM_1_ID ||
-          cId == "cls-a102" || cId == "a102" || cId == CLASSROOM_2_ID) {
-        eligibleIndices[eligibleCount++] = i;
+  NoticeItemFirmware activeItem;
+  bool hasActiveItem = false;
+
+  if (lockNotices(pdMS_TO_TICKS(20))) {
+    for (int i = 0; i < noticeCount; i++) {
+      if (notices[i].active) {
+        String cId = notices[i].classroomId;
+        cId.toLowerCase();
+        if (cId == "all" || cId.length() == 0 ||
+            cId == "cls-a101" || cId == "a101" || cId == CLASSROOM_1_ID ||
+            cId == "cls-a102" || cId == "a102" || cId == CLASSROOM_2_ID) {
+          eligibleIndices[eligibleCount++] = i;
+        }
       }
     }
+    if (eligibleCount > 0) {
+      if (currentNoticeDisplayIndex >= eligibleCount) {
+        currentNoticeDisplayIndex = 0;
+      }
+      int activeNoticeIdx = eligibleIndices[currentNoticeDisplayIndex];
+      activeItem = notices[activeNoticeIdx];
+      hasActiveItem = true;
+    }
+    unlockNotices();
   }
 
-  if (eligibleCount == 0) {
+  if (eligibleCount == 0 || !hasActiveItem) {
     static unsigned long lastStandbyRefresh = 0;
     if (now - lastStandbyRefresh < 500) return;
     lastStandbyRefresh = now;
@@ -2553,8 +2753,7 @@ void updateNoticeBoardDisplay() {
     noticeActiveStartTimeMs = now;
   }
 
-  int activeNoticeIdx = eligibleIndices[currentNoticeDisplayIndex];
-  NoticeItemFirmware &item = notices[activeNoticeIdx];
+  NoticeItemFirmware &item = activeItem;
 
   // Calculate lines and scroll boundaries
   int totalLines = countNoticeLines(item.message, 21);
@@ -3130,6 +3329,10 @@ void setup() {
   Serial.printf(F(" Firmware Version: %s\n"), FIRMWARE_VERSION);
   Serial.println(F("=============================================="));
 
+  // Initialize FreeRTOS Concurrency Mutexes
+  if (!noticeMutex) noticeMutex = xSemaphoreCreateMutex();
+  if (!nvsMutex) nvsMutex = xSemaphoreCreateMutex();
+
   // Initialize NVS Preferences to restore persistent system mode & energy
   // across boots
   preferences.begin("nba_scr", false);
@@ -3173,20 +3376,21 @@ void setup() {
 #endif
 
   // 2. Initialize Relay Output Pins
-  pinMode(RELAY_CLASS_LIGHT1, OUTPUT);
-  pinMode(RELAY_CLASS_FAN1, OUTPUT);
-  pinMode(RELAY_CLASS_LIGHT2, OUTPUT);
-  pinMode(RELAY_CLASS_FAN2, OUTPUT);
-  pinMode(RELAY_CORRIDOR_LIGHT1, OUTPUT);
-  pinMode(RELAY_CORRIDOR_LIGHT2, OUTPUT);
-
-  // Explicitly initialize relay pins to OFF before attaching loads
+  // Set output registers to RELAY_OFF BEFORE setting pinMode to OUTPUT!
+  // This completely eliminates the momentary active-LOW power-on relay click/flash during boot.
   digitalWrite(RELAY_CLASS_LIGHT1, RELAY_OFF);
   digitalWrite(RELAY_CLASS_FAN1, RELAY_OFF);
   digitalWrite(RELAY_CLASS_LIGHT2, RELAY_OFF);
   digitalWrite(RELAY_CLASS_FAN2, RELAY_OFF);
   digitalWrite(RELAY_CORRIDOR_LIGHT1, RELAY_OFF);
   digitalWrite(RELAY_CORRIDOR_LIGHT2, RELAY_OFF);
+
+  pinMode(RELAY_CLASS_LIGHT1, OUTPUT);
+  pinMode(RELAY_CLASS_FAN1, OUTPUT);
+  pinMode(RELAY_CLASS_LIGHT2, OUTPUT);
+  pinMode(RELAY_CLASS_FAN2, OUTPUT);
+  pinMode(RELAY_CORRIDOR_LIGHT1, OUTPUT);
+  pinMode(RELAY_CORRIDOR_LIGHT2, OUTPUT);
   applyRelayStates();
 
   // 2b. Initialize WS2812B Addressable LED Strip (15 LEDs, GPIO 5)
@@ -3402,7 +3606,8 @@ void handleRealtimeWsMessage(const char *data, size_t len) {
   // Pre-filter: only process Phoenix broadcast messages
   if (strstr(data, "\"broadcast\"") == NULL) return;
 
-  DynamicJsonDocument doc(4096);
+  static DynamicJsonDocument doc(4096);
+  doc.clear();
   DeserializationError err = deserializeJson(doc, data, len);
   if (err) return;
 
@@ -3481,7 +3686,7 @@ void handleRealtimeWsMessage(const char *data, size_t len) {
         String serialized;
         serializeJson(p["schedule"], serialized);
         parseDeviceSchedule(sIdx, p["schedule"]);
-        preferences.putString(deviceSchedules[sIdx].nvsKey, serialized);
+        saveDeviceScheduleToNVS(sIdx, serialized);
         Serial.printf("[SCHEDULE] WS push: updated & saved schedule for %s: %s\n", devId, serialized.c_str());
       }
     }
@@ -3536,26 +3741,29 @@ void handleRealtimeWsMessage(const char *data, size_t len) {
   }
 
   if (strcmp(dev, "rgb") == 0) {
+    lastWs2812LocalChange = millis();
     if (p.containsKey("color")) {
       const char *c = p["color"];
       if (c && strlen(c) > 0) ws2812_color = String(c);
     }
     if (p.containsKey("b")) {
-      ws2812_brightness = p["b"];
+      int b = p["b"].as<int>();
+      ws2812_brightness = map(constrain(b, 0, 100), 0, 100, 0, 255);
+    } else if (p.containsKey("brightness")) {
+      int b = p["brightness"].as<int>();
+      ws2812_brightness = map(constrain(b, 0, 100), 0, 100, 0, 255);
     }
     if (p.containsKey("mode")) {
       const char *m = p["mode"];
       if (m && strlen(m) > 0) {
         ws2812_mode = String(m);
         last_ws2812_anim_ms = 0;
-        lastWs2812LocalChange = millis();
       }
     } else if (p.containsKey("rgbMode")) {
       const char *m = p["rgbMode"];
       if (m && strlen(m) > 0) {
         ws2812_mode = String(m);
         last_ws2812_anim_ms = 0;
-        lastWs2812LocalChange = millis();
       }
     }
     applyDeviceControl("rgb", st == 1);
@@ -3747,7 +3955,9 @@ void syncWithSupabase() {
   if (pendingDeviceCloudSyncMask != 0) {
     for (int i = 0; i < NUM_SCHEDULED_DEVICES; i++) {
       if (pendingDeviceCloudSyncMask & (1 << i)) {
+        portENTER_CRITICAL(&syncMaskMux);
         pendingDeviceCloudSyncMask &= ~(1 << i);
+        portEXIT_CRITICAL(&syncMaskMux);
         const char* devId = deviceSchedules[i].primaryId;
         bool isOn = getDeviceCurrentState(deviceSchedules[i].devCode);
 
@@ -3775,8 +3985,9 @@ void syncWithSupabase() {
     return;
   }
 
-  // 1. Fetch Remote Device Commands from Supabase (Every 2500ms)
-  if (now - lastSupabasePoll >= SUPABASE_POLL_INTERVAL_MS) {
+  // 1. Fetch Remote Device Commands from Supabase (Every 2500ms fallback, or 10000ms when WebSocket is healthy)
+  unsigned long effectivePollInterval = wsConnected ? 10000UL : SUPABASE_POLL_INTERVAL_MS;
+  if (now - lastSupabasePoll >= effectivePollInterval) {
     lastSupabasePoll = now;
 
     WiFiClientSecure client;
@@ -3801,7 +4012,8 @@ void syncWithSupabase() {
         supabaseSyncActive = true;
         String payload = https.getString();
 
-        DynamicJsonDocument doc(12288);
+        static DynamicJsonDocument doc(12288);
+        doc.clear();
         DeserializationError err = deserializeJson(doc, payload);
         if (err) {
           Serial.printf("[SUPABASE] JSON Deserialization error: %s (payload bytes: %d)\n", err.c_str(), payload.length());
@@ -3821,10 +4033,14 @@ void syncWithSupabase() {
                 if (sIdx >= 0) {
                   String serialized;
                   serializeJson(s["schedule"], serialized);
-                  String existing = preferences.getString(deviceSchedules[sIdx].nvsKey, "");
+                  String existing = "";
+                  if (lockNVS()) {
+                    existing = preferences.getString(deviceSchedules[sIdx].nvsKey, "");
+                    unlockNVS();
+                  }
                   if (serialized != existing) {
                     parseDeviceSchedule(sIdx, s["schedule"]);
-                    preferences.putString(deviceSchedules[sIdx].nvsKey, serialized);
+                    saveDeviceScheduleToNVS(sIdx, serialized);
                     Serial.printf("[SCHEDULE] Cloud sync: updated & saved schedule for %s: %s\n", id, serialized.c_str());
                   }
                 }
@@ -3951,7 +4167,7 @@ void syncWithSupabase() {
                   if (s.containsKey("rgbMode")) ws2812_mode = s["rgbMode"].as<String>();
                   else if (s.containsKey("mode")) ws2812_mode = s["mode"].as<String>();
                 }
-                updateWs2812Strip();
+                ws2812_needs_update = true;
               }
               else if (strcmp(id, "dev-a101-notice-board") == 0 ||
                        strcmp(id, "dev-a101-notice") == 0) {
@@ -3965,6 +4181,29 @@ void syncWithSupabase() {
                 if (!isOn) setSmartScreenPower(false);
               }
               continue;
+            }
+
+            // Check anti-echo shield for this device:
+            // If controlled locally within the last 12 seconds, stale cloud GET responses must NOT override it!
+            int dIdx = getDeviceScheduleIndex(String(id));
+            if (dIdx >= 0 && (now - lastLocalDeviceControlMs[dIdx] < 12000)) {
+              // Maintain baseline in sync with local state so future polls don't fight
+              bool curSt = getDeviceCurrentState(deviceSchedules[dIdx].devCode);
+              if (dIdx == 0) cloud_prev_c1_light = curSt;
+              else if (dIdx == 1) cloud_prev_c1_fan = curSt;
+              else if (dIdx == 2) cloud_prev_c1_curtain = curSt;
+              else if (dIdx == 3) cloud_prev_c1_notice_board = curSt;
+              else if (dIdx == 4) cloud_prev_c1_smart_screen = curSt;
+              else if (dIdx == 5) cloud_prev_c2_light = curSt;
+              else if (dIdx == 6) cloud_prev_c2_fan = curSt;
+              else if (dIdx == 7) cloud_prev_c2_curtain = curSt;
+              else if (dIdx == 8) cloud_prev_corr1_light = curSt;
+              else if (dIdx == 9) cloud_prev_corr2_light = curSt;
+              else if (dIdx == 10) {
+                cloud_prev_ws2812 = curSt;
+                isOn = curSt; // Shield power state from stale cloud echo, but let color/brightness/mode settings process below!
+              }
+              if (dIdx != 10) continue;
             }
 
             // Differential Tracking:
@@ -4097,16 +4336,24 @@ void syncWithSupabase() {
                 if (s.containsKey("color")) {
                   String newColor = s["color"].as<String>();
                   if (newColor.length() > 0 && newColor != ws2812_color) {
-                    ws2812_color = newColor;
-                    colorChanged = true;
+                    if (millis() - lastWs2812LocalChange < 6000) {
+                      // Suppress stale cloud poll echo for recently commanded local color
+                    } else {
+                      ws2812_color = newColor;
+                      colorChanged = true;
+                    }
                   }
                 }
                 if (s.containsKey("brightness")) {
                   int b = s["brightness"].as<int>();
                   int newB = map(constrain(b, 0, 100), 0, 100, 0, 255);
                   if (newB != ws2812_brightness) {
-                    ws2812_brightness = newB;
-                    colorChanged = true;
+                    if (millis() - lastWs2812LocalChange < 6000) {
+                      // Suppress stale cloud poll echo for recently commanded local brightness
+                    } else {
+                      ws2812_brightness = newB;
+                      colorChanged = true;
+                    }
                   }
                 }
                 String newMode = "";
@@ -4114,7 +4361,7 @@ void syncWithSupabase() {
                 else if (s.containsKey("mode")) newMode = s["mode"].as<String>();
 
                 if (newMode.length() > 0 && newMode != ws2812_mode) {
-                  if (millis() - lastWs2812LocalChange < 8000) {
+                  if (millis() - lastWs2812LocalChange < 6000) {
                     Serial.printf("[WS2812] Cloud poll echo suppressed: recent command set mode '%s' %lu ms ago (cloud had '%s')\n",
                                   ws2812_mode.c_str(), millis() - lastWs2812LocalChange, newMode.c_str());
                   } else {
@@ -4127,7 +4374,7 @@ void syncWithSupabase() {
               if (stateChanged || (colorChanged && isOn)) {
                 cloud_prev_ws2812 = isOn;
                 state_ws2812 = isOn;
-                updateWs2812Strip();
+                ws2812_needs_update = true;
                 Serial.printf("[CLOUD COMMAND] Corridor RGB Strip -> %s (Color: %s, Mode: %s, B: %d)\n",
                               isOn ? "ON" : "OFF", ws2812_color.c_str(), ws2812_mode.c_str(), ws2812_brightness);
               } else if (colorChanged && !isOn) {
@@ -4142,7 +4389,7 @@ void syncWithSupabase() {
             cloud_initialized = true;
 
           if (anyStateChanged) {
-            applyRelayStates();
+            // Relays will be safely actuated by Core 1 loop() without multi-core static re-entrancy
           }
         }
       } else {
@@ -4254,8 +4501,8 @@ void syncWithSupabase() {
       }
     } else {
       // Slot 4: Cloud Digital Notice Board Announcements
-      // Reads dedicated active announcements from Supabase with lean projection
-      String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?select=id,classroom_id,title,message,duration&is_active=eq.true&order=created_at.desc&limit=6";
+      // Reads dedicated active, non-expired announcements from Supabase with lean projection
+      String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?select=id,classroom_id,title,message,duration&is_active=eq.true&or=%28expires_at.is.null,expires_at.gt.now%28%29%29&order=created_at.desc&limit=6";
       const char *annHeaderKeys[] = {"Date"};
       https.collectHeaders(annHeaderKeys, 1);
       if (https.begin(client, urlAnn)) {
@@ -4269,7 +4516,8 @@ void syncWithSupabase() {
             syncTimeFromHttpDateHeader(https.header("Date"));
           }
           String payload = https.getString();
-          DynamicJsonDocument doc(4096);
+          static DynamicJsonDocument doc(4096);
+          doc.clear();
           DeserializationError err = deserializeJson(doc, payload);
           if (!err && doc.is<JsonArray>()) {
             reconcileNoticesFromCloud(doc.as<JsonArray>());
@@ -4284,6 +4532,8 @@ void syncWithSupabase() {
     return;
   }
 }
+
+static bool initialCloudNoticeSyncDone = false;
 
 void reconcileNoticesFromCloud(JsonArray cloudNotices) {
   NoticeItemFirmware updated[MAX_FIRMWARE_NOTICES];
@@ -4311,11 +4561,14 @@ void reconcileNoticesFromCloud(JsonArray cloudNotices) {
 
       // Preserve existing createdAtMs if notice was already active to allow natural expiration
       unsigned long origCreatedAt = millis();
-      for (int k = 0; k < noticeCount; k++) {
-        if (notices[k].id == String(aid)) {
-          origCreatedAt = notices[k].createdAtMs;
-          break;
+      if (lockNotices()) {
+        for (int k = 0; k < noticeCount; k++) {
+          if (notices[k].id == String(aid)) {
+            origCreatedAt = notices[k].createdAtMs;
+            break;
+          }
         }
+        unlockNotices();
       }
       updated[updatedCount].createdAtMs = origCreatedAt;
       updated[updatedCount].active = true;
@@ -4325,71 +4578,78 @@ void reconcileNoticesFromCloud(JsonArray cloudNotices) {
 
   bool hasBrandNewNotice = false;
   int brandNewNoticeIdx = 0;
-  for (int i = 0; i < updatedCount; i++) {
-    bool existed = false;
-    for (int k = 0; k < noticeCount; k++) {
-      if (notices[k].id == updated[i].id) {
-        existed = true;
+  bool changed = false;
+
+  if (lockNotices()) {
+    for (int i = 0; i < updatedCount; i++) {
+      bool existed = false;
+      for (int k = 0; k < noticeCount; k++) {
+        if (notices[k].id == updated[i].id) {
+          existed = true;
+          break;
+        }
+      }
+      if (!existed) {
+        hasBrandNewNotice = true;
+        brandNewNoticeIdx = i;
         break;
       }
     }
-    if (!existed) {
-      hasBrandNewNotice = true;
-      brandNewNoticeIdx = i;
-      break;
-    }
-  }
 
-  bool changed = (noticeCount != updatedCount);
-  if (!changed) {
-    for (int i = 0; i < noticeCount; i++) {
-      if (notices[i].id != updated[i].id || notices[i].title != updated[i].title || notices[i].message != updated[i].message) {
-        changed = true;
-        break;
-      }
-    }
-  }
-
-  if (changed) {
-    // Preserve breaking notice popup if the notice still exists
-    bool keepPopup = false;
-    if (newNoticePopupUntilMs > millis() && activeNoticePopupIndex >= 0 && activeNoticePopupIndex < noticeCount) {
-      String popupId = notices[activeNoticePopupIndex].id;
-      for (int i = 0; i < updatedCount; i++) {
-        if (updated[i].id == popupId) {
-          activeNoticePopupIndex = i;
-          keepPopup = true;
+    changed = (noticeCount != updatedCount);
+    if (!changed) {
+      for (int i = 0; i < noticeCount; i++) {
+        if (notices[i].id != updated[i].id || notices[i].title != updated[i].title || notices[i].message != updated[i].message) {
+          changed = true;
           break;
         }
       }
     }
-    if (!keepPopup) {
-      newNoticePopupUntilMs = 0;
-    }
 
-    noticeCount = updatedCount;
-    for (int i = 0; i < noticeCount; i++) {
-      notices[i] = updated[i];
-    }
-    if (currentNoticeDisplayIndex >= noticeCount) {
-      currentNoticeDisplayIndex = 0;
-    }
-    if (singleOledNoticeIdx >= noticeCount) {
-      singleOledNoticeIdx = 0;
-    }
+    if (changed) {
+      // Preserve breaking notice popup if the notice still exists
+      bool keepPopup = false;
+      if (newNoticePopupUntilMs > millis() && activeNoticePopupIndex >= 0 && activeNoticePopupIndex < noticeCount) {
+        String popupId = notices[activeNoticePopupIndex].id;
+        for (int i = 0; i < updatedCount; i++) {
+          if (updated[i].id == popupId) {
+            activeNoticePopupIndex = i;
+            keepPopup = true;
+            break;
+          }
+        }
+      }
+      if (!keepPopup) {
+        newNoticePopupUntilMs = 0;
+      }
 
-    // Trigger audio chime and popup on brand new announcement from cloud!
-    if (hasBrandNewNotice) {
-      newNoticePopupUntilMs = millis() + 15000UL;
-      activeNoticePopupIndex = brandNewNoticeIdx;
-      triggerNoticeBeep();
-      Serial.printf("[NOTICE] New cloud announcement received ('%s') -> Beep & Popup triggered!\n",
-                    notices[brandNewNoticeIdx].title.c_str());
+      noticeCount = updatedCount;
+      for (int i = 0; i < noticeCount; i++) {
+        notices[i] = updated[i];
+      }
+      if (currentNoticeDisplayIndex >= noticeCount) {
+        currentNoticeDisplayIndex = 0;
+      }
+      if (singleOledNoticeIdx >= noticeCount) {
+        singleOledNoticeIdx = 0;
+      }
     }
-
-    saveNoticesToNVS();
-    Serial.printf("[SUPABASE] Cloud notices reconciled: %d active notices.\n", noticeCount);
+    unlockNotices();
   }
+
+  // Trigger audio chime and popup ONLY on genuinely new announcements while system is running!
+  // Never chime on bootup or historical sync
+  if (hasBrandNewNotice && initialCloudNoticeSyncDone) {
+    newNoticePopupUntilMs = millis() + 15000UL;
+    activeNoticePopupIndex = brandNewNoticeIdx;
+    pendingNoticeBeep = true;
+    Serial.printf("[NOTICE] New cloud announcement received ('%s') -> Beep & Popup triggered!\n",
+                  notices[brandNewNoticeIdx].title.c_str());
+  }
+
+  saveNoticesToNVS();
+  Serial.printf("[SUPABASE] Cloud notices reconciled: %d active notices.\n", noticeCount);
+  initialCloudNoticeSyncDone = true;
 }
 
 // Dedicated helper to pull active notices from Supabase immediately on Wi-Fi connection
@@ -4399,7 +4659,7 @@ void fetchNoticesFromSupabaseCloud() {
   client.setInsecure();
   client.setTimeout(4000);
   HTTPClient https;
-  String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?is_active=eq.true&order=created_at.desc&limit=8";
+  String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?select=id,classroom_id,title,message,duration&is_active=eq.true&or=%28expires_at.is.null,expires_at.gt.now%28%29%29&order=created_at.desc&limit=8";
   if (https.begin(client, urlAnn)) {
     https.addHeader("apikey", SUPABASE_KEY);
     https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
@@ -4418,6 +4678,7 @@ void fetchNoticesFromSupabaseCloud() {
     client.stop();
   }
 }
+
 
 // Dedicated FreeRTOS background task running on Core 0
 // Ensures cloud HTTPS polling NEVER blocks Core 1's local HTTP REST API / relay
@@ -4464,6 +4725,10 @@ void loop() {
   }
 
   // 1c. Non-blocking Audio Alert Buzzer & Timetable Period Bell
+  if (pendingNoticeBeep) {
+    pendingNoticeBeep = false;
+    triggerNoticeBeep();
+  }
   handleBuzzer();
   checkTimetableBell();
 
@@ -4653,6 +4918,9 @@ void loop() {
   // 7. Non-blocking smooth servo sweep
   updateServos();
 
+  // 7b. Safely synchronize OLED display power states on Core 1 (prevents cross-core I2C bus contention)
+  syncDisplayPowerStates();
+
   // (Supabase Cloud Sync runs in background on Core 0 via supabaseCloudTask)
 
   // 8. OLED Display Refresh (Every 1000ms)
@@ -4690,16 +4958,19 @@ void loop() {
       // Collect eligible notices for A101 / A102 / ALL
       int eligibleIndices[MAX_FIRMWARE_NOTICES];
       int eligibleCount = 0;
-      for (int i = 0; i < noticeCount; i++) {
-        if (notices[i].active) {
-          String cId = notices[i].classroomId;
-          cId.toLowerCase();
-          if (cId == "all" || cId.length() == 0 ||
-              cId == "cls-a101" || cId == "a101" || cId == CLASSROOM_1_ID ||
-              cId == "cls-a102" || cId == "a102" || cId == CLASSROOM_2_ID) {
-            eligibleIndices[eligibleCount++] = i;
+      if (lockNotices(pdMS_TO_TICKS(20))) {
+        for (int i = 0; i < noticeCount; i++) {
+          if (notices[i].active) {
+            String cId = notices[i].classroomId;
+            cId.toLowerCase();
+            if (cId == "all" || cId.length() == 0 ||
+                cId == "cls-a101" || cId == "a101" || cId == CLASSROOM_1_ID ||
+                cId == "cls-a102" || cId == "a102" || cId == CLASSROOM_2_ID) {
+              eligibleIndices[eligibleCount++] = i;
+            }
           }
         }
+        unlockNotices();
       }
 
       // Priority 0: Period Over Alert Popup (10s duration)
@@ -4727,10 +4998,19 @@ void loop() {
       }
 
       // Priority 1: High-Priority Breaking Notice Popup (15s after receipt)
-      if (now < newNoticePopupUntilMs && activeNoticePopupIndex >= 0 &&
-          activeNoticePopupIndex < noticeCount && notices[activeNoticePopupIndex].active) {
-        NoticeItemFirmware &popItem = notices[activeNoticePopupIndex];
+      NoticeItemFirmware popItem;
+      bool hasPopItem = false;
+      if (now < newNoticePopupUntilMs && activeNoticePopupIndex >= 0) {
+        if (lockNotices(pdMS_TO_TICKS(20))) {
+          if (activeNoticePopupIndex < noticeCount && notices[activeNoticePopupIndex].active) {
+            popItem = notices[activeNoticePopupIndex];
+            hasPopItem = true;
+          }
+          unlockNotices();
+        }
+      }
 
+      if (hasPopItem) {
         // 1. Top Inverted Alert Banner
         display.fillRect(0, 0, 128, 12, SSD1306_WHITE);
         display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
@@ -4788,41 +5068,51 @@ void loop() {
 
       if (singleOledScreen == 1 && eligibleCount > 0) {
         int nIdx = eligibleIndices[singleOledNoticeIdx % eligibleCount];
-        NoticeItemFirmware &item = notices[nIdx];
-
-        String tgt = item.classroomId;
-        if (tgt == "all" || tgt.length() == 0) tgt = "ALL";
-        else if (tgt.indexOf("101") != -1) tgt = "A101";
-        else if (tgt.indexOf("102") != -1) tgt = "A102";
-
-        display.setCursor(0, 0);
-        if (eligibleCount > 1) {
-          display.printf("[%d/%d] NOTICE (%s)", (singleOledNoticeIdx % eligibleCount) + 1, eligibleCount, tgt.c_str());
-        } else {
-          display.printf("NOTICE BOARD (%s)", tgt.c_str());
+        NoticeItemFirmware item;
+        bool hasItem = false;
+        if (lockNotices(pdMS_TO_TICKS(20))) {
+          if (nIdx < noticeCount && notices[nIdx].active) {
+            item = notices[nIdx];
+            hasItem = true;
+          }
+          unlockNotices();
         }
-        display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
 
-        // Title
-        display.setCursor(0, 14);
-        display.print(F("> "));
-        String t = item.title;
-        if (t.length() > 19) t = t.substring(0, 16) + "...";
-        display.print(t);
-        display.drawLine(0, 23, 128, 23, SSD1306_WHITE);
+        if (hasItem) {
+          String tgt = item.classroomId;
+          if (tgt == "all" || tgt.length() == 0) tgt = "ALL";
+          else if (tgt.indexOf("101") != -1) tgt = "A101";
+          else if (tgt.indexOf("102") != -1) tgt = "A102";
 
-        // Message Body
-        drawNoticeWordWrap(display, item.message, 0, 26, 21, 0);
+          display.setCursor(0, 0);
+          if (eligibleCount > 1) {
+            display.printf("[%d/%d] NOTICE (%s)", (singleOledNoticeIdx % eligibleCount) + 1, eligibleCount, tgt.c_str());
+          } else {
+            display.printf("NOTICE BOARD (%s)", tgt.c_str());
+          }
+          display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
 
-        // Footer
-        display.fillRect(0, 52, 128, 12, SSD1306_BLACK);
-        display.drawLine(0, 52, 128, 52, SSD1306_WHITE);
-        display.setCursor(0, 55);
-        display.printf("Duration: %s", item.duration.c_str());
+          // Title
+          display.setCursor(0, 14);
+          display.print(F("> "));
+          String t = item.title;
+          if (t.length() > 19) t = t.substring(0, 16) + "...";
+          display.print(t);
+          display.drawLine(0, 23, 128, 23, SSD1306_WHITE);
 
-        display.display();
-        lastDisplayUpdate = now;
-        return;
+          // Message Body
+          drawNoticeWordWrap(display, item.message, 0, 26, 21, 0);
+
+          // Footer
+          display.fillRect(0, 52, 128, 12, SSD1306_BLACK);
+          display.drawLine(0, 52, 128, 52, SSD1306_WHITE);
+          display.setCursor(0, 55);
+          display.printf("Duration: %s", item.duration.c_str());
+
+          display.display();
+          lastDisplayUpdate = now;
+          return;
+        }
       }
     }
 
