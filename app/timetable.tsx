@@ -9,8 +9,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { Layout } from '../constants/layout';
-import { useApp, useTheme } from '../context/AppContext';
+import { useApp, useTheme, migrateTimetableConfig } from '../context/AppContext';
 import { TimetableConfig, TimetablePeriod, BellPattern } from '../types';
+import { defaultTimetable } from '../mock_data/mockData';
 import { DrumTimePickerModal } from '../components/DrumTimePickerModal';
 import { triggerHaptic } from '../utils/haptics';
 
@@ -25,15 +26,14 @@ const DAYS = [
 ];
 
 const BELL_PATTERNS: { id: BellPattern; name: string; desc: string; icon: string }[] = [
-  { id: 'japanese-school-bell', name: 'Japanese School Bell', desc: 'Kin-Kon-Kan-Kon (キーンコーン)', icon: 'school' },
-  { id: 'westminster', name: 'Westminster Chime', desc: '8-Note Big Ben Quarters', icon: 'musical-notes' },
+  { id: 'westminster', name: 'Westminster Chime', desc: 'Full 16-Note Big Ben Quarters', icon: 'musical-notes' },
+  { id: 'st-michael', name: 'St. Michael Chime', desc: 'Historic 16-Note Cathedral Chime', icon: 'library' },
   { id: 'college-bell', name: 'College Bell', desc: '3 Ascending Academic Rings', icon: 'notifications' },
   { id: 'triple-chime', name: 'Triple Chime', desc: '3 Gentle Harmonic Notes', icon: 'volume-medium' },
   { id: 'lunch-fanfare', name: 'Lunch Fanfare', desc: '6-Note Upbeat Melody', icon: 'restaurant' },
   { id: 'dismissal-chime', name: 'Dismissal Scale', desc: '7-Note End-of-Day Chime', icon: 'walk' },
   { id: 'ding-dong', name: 'Classic Ding-Dong', desc: 'Warm 2-Tone Transition', icon: 'notifications-circle' },
   { id: 'marimba-cascade', name: 'Marimba Cascade', desc: '5-Note Flowing Chime', icon: 'water' },
-  { id: 'st-michael', name: 'St. Michael Chime', desc: 'Cathedral 4-Note Cadence', icon: 'library' },
   { id: 'digital-synth', name: 'Future Synth Chime', desc: '5-Note Rising Arpeggio', icon: 'sparkles' },
   { id: 'morning-reveille', name: 'Morning Fanfare', desc: '5-Note Motivating Assembly', icon: 'sunny' },
   { id: 'gentle-wind', name: 'Gentle Pentatonic', desc: '5-Note Relaxing Breeze', icon: 'leaf' },
@@ -47,7 +47,7 @@ export default function TimetableScreen() {
   const { timetable, updateTimetable, triggerBellTest, esp32Connected } = useApp();
   const { colors, isDark } = useTheme();
 
-  const [activeConfig, setActiveConfig] = useState<TimetableConfig>(timetable);
+  const [activeConfig, setActiveConfig] = useState<TimetableConfig>(() => migrateTimetableConfig(timetable));
   const [modalVisible, setModalVisible] = useState(false);
   const [editingPeriodId, setEditingPeriodId] = useState<string | null>(null);
 
@@ -76,17 +76,21 @@ export default function TimetableScreen() {
   const [defaultToneModalVisible, setDefaultToneModalVisible] = useState(false);
 
   // Add/Edit modal: customized chime and day assignments
-  const [periodBellPattern, setPeriodBellPattern] = useState<BellPattern>(activeConfig.defaultPattern);
+  const [periodBellPattern, setPeriodBellPattern] = useState<BellPattern>(activeConfig.defaultPattern || 'college-bell');
   const [periodDays, setPeriodDays] = useState<number[]>([]);
 
   const currentDefaultPattern = React.useMemo(() => {
-    return BELL_PATTERNS.find(b => b.id === activeConfig.defaultPattern) || BELL_PATTERNS[0];
+    return BELL_PATTERNS.find(b => b.id === (activeConfig.defaultPattern || 'college-bell')) || BELL_PATTERNS.find(b => b.id === 'college-bell') || BELL_PATTERNS[0];
   }, [activeConfig.defaultPattern]);
 
-  // Sync state if context updates
+  // Sync state if context updates, ensuring migration is applied immediately
   useEffect(() => {
-    setActiveConfig(timetable);
-  }, [timetable]);
+    const migrated = migrateTimetableConfig(timetable);
+    setActiveConfig(migrated);
+    if (JSON.stringify(migrated) !== JSON.stringify(timetable)) {
+      void updateTimetable(migrated);
+    }
+  }, [timetable, updateTimetable]);
 
   // Live period tracker
   const [currentTimeStr, setCurrentTimeStr] = useState('');
@@ -205,8 +209,8 @@ export default function TimetableScreen() {
   };
 
   const getPeriodChime = (pat?: BellPattern) => {
-    const id = pat || activeConfig.defaultPattern;
-    return BELL_PATTERNS.find(b => b.id === id) || BELL_PATTERNS[0];
+    const id = pat || activeConfig.defaultPattern || 'college-bell';
+    return BELL_PATTERNS.find(b => b.id === id) || BELL_PATTERNS.find(b => b.id === 'college-bell') || BELL_PATTERNS[0];
   };
 
   const displayedPeriods = React.useMemo(() => {
@@ -225,7 +229,7 @@ export default function TimetableScreen() {
     setStartTime('09:00');
     setEndTime('10:00');
     setPeriodType('class');
-    setPeriodBellPattern(activeConfig.defaultPattern);
+    setPeriodBellPattern(activeConfig.defaultPattern || 'college-bell');
     setPeriodDays(selectedDayTab !== 'all' ? [selectedDayTab] : []);
     setModalVisible(true);
   };
@@ -240,6 +244,26 @@ export default function TimetableScreen() {
     setPeriodBellPattern(p.bellPattern || activeConfig.defaultPattern);
     setPeriodDays(p.days && p.days.length > 0 ? [...p.days] : []);
     setModalVisible(true);
+  };
+
+  const handleResetToDefaults = () => {
+    triggerHaptic.warning();
+    RNAlert.alert(
+      'Reset Schedule to Defaults',
+      'This will reset your class timetable to the recommended standard chime config:\n\n• Hour 1: Westminster Chime\n• Period 2–5: College Bell\n• Morning Tea Break: Triple Chime\n• Lunch Break: St. Michael Chime\n• Hour 6 Dismissal: Dismissal Scale\n• Master Default: College Bell\n\nDo you want to proceed?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset Schedule',
+          style: 'destructive',
+          onPress: async () => {
+            triggerHaptic.success();
+            setActiveConfig(defaultTimetable);
+            await updateTimetable(defaultTimetable);
+          },
+        },
+      ]
+    );
   };
 
   const handleSavePeriod = () => {
@@ -538,7 +562,7 @@ export default function TimetableScreen() {
 
         {/* Schedule List Header & Day Filter */}
         <View style={styles.scheduleHeaderRow}>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={styles.scheduleSectionTitle}>Class Schedule</Text>
             <Text style={styles.scheduleSubtitle}>
               {selectedDayTab === 'all'
@@ -546,10 +570,21 @@ export default function TimetableScreen() {
                 : `${DAYS.find(d => d.day === selectedDayTab)?.label} timetable (${displayedPeriods.length} periods)`}
             </Text>
           </View>
-          <TouchableOpacity style={styles.addTextBtn} onPress={openAddModal}>
-            <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
-            <Text style={styles.addTextBtnLabel}>Add Period</Text>
-          </TouchableOpacity>
+          <View style={styles.scheduleHeaderActions}>
+            <TouchableOpacity
+              style={styles.resetScheduleBtn}
+              onPress={handleResetToDefaults}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="refresh-outline" size={13} color={colors.textMuted} />
+              <Text style={styles.resetScheduleBtnText}>Reset</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.addTextBtn} onPress={openAddModal}>
+              <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
+              <Text style={styles.addTextBtnLabel}>Add Period</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Day Filter Tabs */}
@@ -1410,6 +1445,27 @@ function getStyles(colors: any, isDark: boolean) {
       color: colors.textMuted,
       fontSize: 12,
       marginTop: 2,
+    },
+    scheduleHeaderActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    resetScheduleBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 9,
+      paddingVertical: 6,
+      borderRadius: Layout.radius.sm,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.1)',
+    },
+    resetScheduleBtnText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
     },
     addTextBtn: {
       flexDirection: 'row',

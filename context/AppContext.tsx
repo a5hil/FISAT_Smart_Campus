@@ -376,6 +376,53 @@ function safeRealtimeBroadcast(
   }
 }
 
+export function migrateTimetableConfig(tt: TimetableConfig): TimetableConfig {
+  if (!tt || !Array.isArray(tt.periods) || tt.periods.length === 0) return defaultTimetable;
+
+  const defaultPattern: BellPattern = (!tt.defaultPattern || tt.defaultPattern === 'japanese-school-bell' || tt.defaultPattern === 'westminster')
+    ? 'college-bell'
+    : tt.defaultPattern;
+
+  const periods = tt.periods.map(p => {
+    let pat = p.bellPattern;
+    const nameLower = (p.name || '').toLowerCase();
+    const idLower = (p.id || '').toLowerCase();
+
+    // Map legacy japanese-school-bell to westminster
+    if (pat === 'japanese-school-bell') {
+      pat = 'westminster';
+    }
+
+    // Auto-update standard schedule slots to user's desired defaults
+    if (idLower === 'p-1' || nameLower.includes('period 1') || nameLower.includes('hour 1')) {
+      pat = 'westminster';
+    } else if (idLower === 'p-break' || nameLower.includes('tea break') || nameLower.includes('morning tea')) {
+      pat = 'triple-chime';
+    } else if (idLower === 'p-lunch' || nameLower.includes('lunch')) {
+      pat = 'st-michael';
+    } else if (idLower === 'p-6' || nameLower.includes('period 6') || nameLower.includes('dismissal') || nameLower.includes('hour 6')) {
+      pat = 'dismissal-chime';
+    } else if (
+      idLower === 'p-2' || idLower === 'p-3' || idLower === 'p-4' || idLower === 'p-5' ||
+      nameLower.includes('period 2') || nameLower.includes('period 3') || nameLower.includes('period 4') || nameLower.includes('period 5') ||
+      nameLower.includes('hour 2') || nameLower.includes('hour 3') || nameLower.includes('hour 4') || nameLower.includes('hour 5')
+    ) {
+      pat = 'college-bell';
+    }
+
+    return {
+      ...p,
+      bellPattern: pat || defaultPattern,
+    };
+  });
+
+  return {
+    ...tt,
+    defaultPattern,
+    periods,
+  };
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User>(mockUser);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -506,8 +553,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (modeDev && modeDev.settings && typeof modeDev.settings === 'object') {
       const cloudTt = (modeDev.settings as Record<string, unknown>).timetable as TimetableConfig | undefined;
       if (cloudTt && Array.isArray(cloudTt.periods) && cloudTt.periods.length > 0) {
-        setTimetable(cloudTt);
-        void AsyncStorage.setItem(STORAGE_KEYS.TIMETABLE, JSON.stringify(cloudTt));
+        const migrated = migrateTimetableConfig(cloudTt);
+        setTimetable(migrated);
+        void AsyncStorage.setItem(STORAGE_KEYS.TIMETABLE, JSON.stringify(migrated));
       } else {
         // Seed default timetable into Supabase so cloud and ESP32 have a shared copy
         void supabase.from('devices').update({
@@ -692,7 +740,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const storedTimetable = await AsyncStorage.getItem(STORAGE_KEYS.TIMETABLE);
           if (storedTimetable) {
             try {
-              setTimetable(JSON.parse(storedTimetable));
+              setTimetable(migrateTimetableConfig(JSON.parse(storedTimetable)));
             } catch {}
           }
 
@@ -794,8 +842,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
               if (newRecord.settings && typeof newRecord.settings === 'object') {
                 const cloudTt = (newRecord.settings as Record<string, unknown>).timetable as TimetableConfig | undefined;
                 if (cloudTt && Array.isArray(cloudTt.periods) && cloudTt.periods.length > 0) {
-                  setTimetable(cloudTt);
-                  void AsyncStorage.setItem(STORAGE_KEYS.TIMETABLE, JSON.stringify(cloudTt));
+                  const migrated = migrateTimetableConfig(cloudTt);
+                  setTimetable(migrated);
+                  void AsyncStorage.setItem(STORAGE_KEYS.TIMETABLE, JSON.stringify(migrated));
                 }
               }
               return;

@@ -7,37 +7,47 @@ interface ChimeNote {
 }
 
 export const CHIME_MELODIES: Record<BellPattern, ChimeNote[]> = {
-  'japanese-school-bell': [
-    // Phrase 1 (Kin - Kon - Kan - Kon)
+  'westminster': [
+    // Westminster Chime (Full 16-Note Big Ben Quarters in F Major)
+    // Phrase 1 (Quarter 1)
     { freq: 698.46, durationMs: 520, restMs: 40 },  // F5
     { freq: 880.00, durationMs: 520, restMs: 40 },  // A5
     { freq: 783.99, durationMs: 520, restMs: 40 },  // G5
     { freq: 523.25, durationMs: 880, restMs: 400 }, // C5
-    // Phrase 2
+    // Phrase 2 (Quarter 2)
     { freq: 698.46, durationMs: 520, restMs: 40 },  // F5
     { freq: 783.99, durationMs: 520, restMs: 40 },  // G5
     { freq: 880.00, durationMs: 520, restMs: 40 },  // A5
     { freq: 698.46, durationMs: 980, restMs: 500 }, // F5
-    // Phrase 3
+    // Phrase 3 (Quarter 3)
     { freq: 880.00, durationMs: 520, restMs: 40 },  // A5
     { freq: 698.46, durationMs: 520, restMs: 40 },  // F5
     { freq: 783.99, durationMs: 520, restMs: 40 },  // G5
     { freq: 523.25, durationMs: 880, restMs: 400 }, // C5
-    // Phrase 4
+    // Phrase 4 (Quarter 4 Full Hour Cadence)
     { freq: 523.25, durationMs: 520, restMs: 40 },  // C5
     { freq: 783.99, durationMs: 520, restMs: 40 },  // G5
     { freq: 880.00, durationMs: 520, restMs: 40 },  // A5
     { freq: 698.46, durationMs: 1200 },             // F5
   ],
-  'westminster': [
-    { freq: 659.25, durationMs: 320 },
-    { freq: 830.61, durationMs: 320 },
-    { freq: 739.99, durationMs: 320 },
-    { freq: 493.88, durationMs: 550, restMs: 150 },
-    { freq: 659.25, durationMs: 320 },
-    { freq: 739.99, durationMs: 320 },
-    { freq: 830.61, durationMs: 320 },
-    { freq: 659.25, durationMs: 650 },
+  'japanese-school-bell': [
+    // Legacy alias to full Westminster chime
+    { freq: 698.46, durationMs: 520, restMs: 40 },  // F5
+    { freq: 880.00, durationMs: 520, restMs: 40 },  // A5
+    { freq: 783.99, durationMs: 520, restMs: 40 },  // G5
+    { freq: 523.25, durationMs: 880, restMs: 400 }, // C5
+    { freq: 698.46, durationMs: 520, restMs: 40 },  // F5
+    { freq: 783.99, durationMs: 520, restMs: 40 },  // G5
+    { freq: 880.00, durationMs: 520, restMs: 40 },  // A5
+    { freq: 698.46, durationMs: 980, restMs: 500 }, // F5
+    { freq: 880.00, durationMs: 520, restMs: 40 },  // A5
+    { freq: 698.46, durationMs: 520, restMs: 40 },  // F5
+    { freq: 783.99, durationMs: 520, restMs: 40 },  // G5
+    { freq: 523.25, durationMs: 880, restMs: 400 }, // C5
+    { freq: 523.25, durationMs: 520, restMs: 40 },  // C5
+    { freq: 783.99, durationMs: 520, restMs: 40 },  // G5
+    { freq: 880.00, durationMs: 520, restMs: 40 },  // A5
+    { freq: 698.46, durationMs: 1200 },             // F5
   ],
   'college-bell': [
     { freq: 659.25, durationMs: 450, restMs: 150 },
@@ -78,10 +88,25 @@ export const CHIME_MELODIES: Record<BellPattern, ChimeNote[]> = {
     { freq: 523.25, durationMs: 400 },
   ],
   'st-michael': [
-    { freq: 739.99, durationMs: 300 },
-    { freq: 659.25, durationMs: 300 },
-    { freq: 587.33, durationMs: 300 },
-    { freq: 440.00, durationMs: 600 },
+    // St. Michael's Chimes (Full 16-Note Historic Cathedral Melody in F Major)
+    // Phrase 1 (Descending Scale: 8-7-6-5-4-3-2-1)
+    { freq: 698.46, durationMs: 320, restMs: 40 },  // F5
+    { freq: 659.25, durationMs: 320, restMs: 40 },  // E5
+    { freq: 587.33, durationMs: 320, restMs: 40 },  // D5
+    { freq: 523.25, durationMs: 320, restMs: 40 },  // C5
+    { freq: 466.16, durationMs: 320, restMs: 40 },  // Bb4
+    { freq: 440.00, durationMs: 320, restMs: 40 },  // A4
+    { freq: 392.00, durationMs: 320, restMs: 40 },  // G4
+    { freq: 349.23, durationMs: 750, restMs: 350 }, // F4
+    // Phrase 2 (Melodic Resolution: 8-2-3-4-7-5-6-1)
+    { freq: 698.46, durationMs: 320, restMs: 40 },  // F5
+    { freq: 392.00, durationMs: 320, restMs: 40 },  // G4
+    { freq: 440.00, durationMs: 320, restMs: 40 },  // A4
+    { freq: 466.16, durationMs: 320, restMs: 40 },  // Bb4
+    { freq: 659.25, durationMs: 320, restMs: 40 },  // E5
+    { freq: 523.25, durationMs: 320, restMs: 40 },  // C5
+    { freq: 587.33, durationMs: 320, restMs: 40 },  // D5
+    { freq: 349.23, durationMs: 1000 },             // F4
   ],
   'digital-synth': [
     { freq: 523.25, durationMs: 100 },

@@ -104,8 +104,10 @@ inline void unlockNVS() {
 // ==========================================
 // --- MUSICAL NOTES & PIEZO AUDIO DRIVER ---
 // ==========================================
+#define NOTE_F4  349
 #define NOTE_G4  392
 #define NOTE_A4  440
+#define NOTE_AS4 466
 #define NOTE_B4  494
 #define NOTE_C5  523
 #define NOTE_CS5 554
@@ -226,38 +228,29 @@ void playBellPattern(const char* pattern) {
   String p = String(pattern);
   p.toLowerCase();
 
-  if (p == "japanese-school-bell" || p == "japanese" || p == "kin-kon-kan-kon") {
-    // Iconic Japanese School Bell Chime (キーンコーンカーンコーン / Kin-Kon-Kan-Kon)
-    // Westminster chime played in F Major with the nostalgic school bell cadence
+  if (p == "westminster" || p == "japanese-school-bell" || p == "japanese" || p == "kin-kon-kan-kon") {
+    // Westminster chime (Full 16-Note Big Ben Quarters in F Major)
     const BuzzerNote melody[] = {
-      // Phrase 1 (Kin - Kon - Kan - Kon)
+      // Phrase 1 (Quarter 1)
       { NOTE_F5, 520 }, { REST, 40 },
       { NOTE_A5, 520 }, { REST, 40 },
       { NOTE_G5, 520 }, { REST, 40 },
       { NOTE_C5, 880 }, { REST, 400 },
-      // Phrase 2
+      // Phrase 2 (Quarter 2)
       { NOTE_F5, 520 }, { REST, 40 },
       { NOTE_G5, 520 }, { REST, 40 },
       { NOTE_A5, 520 }, { REST, 40 },
       { NOTE_F5, 980 }, { REST, 500 },
-      // Phrase 3
+      // Phrase 3 (Quarter 3)
       { NOTE_A5, 520 }, { REST, 40 },
       { NOTE_F5, 520 }, { REST, 40 },
       { NOTE_G5, 520 }, { REST, 40 },
       { NOTE_C5, 880 }, { REST, 400 },
-      // Phrase 4
+      // Phrase 4 (Quarter 4 Hour Cadence)
       { NOTE_C5, 520 }, { REST, 40 },
       { NOTE_G5, 520 }, { REST, 40 },
       { NOTE_A5, 520 }, { REST, 40 },
       { NOTE_F5, 1200 }
-    };
-    queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
-  } else if (p == "westminster") {
-    // 8-note Westminster Quarters (Big Ben chime)
-    const BuzzerNote melody[] = {
-      { NOTE_E5, 320 }, { NOTE_GS5, 320 }, { NOTE_FS5, 320 }, { NOTE_B4, 550 },
-      { REST, 150 },
-      { NOTE_E5, 320 }, { NOTE_FS5, 320 }, { NOTE_GS5, 320 }, { NOTE_E5, 650 }
     };
     queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
   } else if (p == "triple-chime") {
@@ -297,9 +290,28 @@ void playBellPattern(const char* pattern) {
     };
     queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
   } else if (p == "st-michael") {
-    // Cathedral 4-Note Cadence (F#5 -> E5 -> D5 -> A4)
+    // Historic St. Michael's Chime (Full 16-Note Cathedral Melody in F Major)
+    // Phrase 1 (Descending Scale: 8-7-6-5-4-3-2-1)
+    // Phrase 2 (Melodic Resolution: 8-2-3-4-7-5-6-1)
     const BuzzerNote melody[] = {
-      { NOTE_FS5, 300 }, { NOTE_E5, 300 }, { NOTE_D5, 300 }, { NOTE_A4, 600 }
+      // Phrase 1
+      { NOTE_F5, 320 }, { REST, 40 },
+      { NOTE_E5, 320 }, { REST, 40 },
+      { NOTE_D5, 320 }, { REST, 40 },
+      { NOTE_C5, 320 }, { REST, 40 },
+      { NOTE_AS4, 320 }, { REST, 40 },
+      { NOTE_A4, 320 }, { REST, 40 },
+      { NOTE_G4, 320 }, { REST, 40 },
+      { NOTE_F4, 750 }, { REST, 350 },
+      // Phrase 2
+      { NOTE_F5, 320 }, { REST, 40 },
+      { NOTE_G4, 320 }, { REST, 40 },
+      { NOTE_A4, 320 }, { REST, 40 },
+      { NOTE_AS4, 320 }, { REST, 40 },
+      { NOTE_E5, 320 }, { REST, 40 },
+      { NOTE_C5, 320 }, { REST, 40 },
+      { NOTE_D5, 320 }, { REST, 40 },
+      { NOTE_F4, 1000 }
     };
     queueChimeNotes(melody, sizeof(melody) / sizeof(melody[0]));
   } else if (p == "digital-synth") {
@@ -396,7 +408,7 @@ volatile unsigned long periodOverAlertUntilMs = 0;
 void loadDefaultTimetable() {
   timetableEnabled = true;
   timetableActiveDays = 0b00111110;
-  strcpy(timetableDefaultPattern, "westminster");
+  strcpy(timetableDefaultPattern, "college-bell");
   timetablePeriodCount = 8;
 
   const char* ids[] = {"p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"};
@@ -415,7 +427,7 @@ void loadDefaultTimetable() {
   int eH[] = {10, 11, 11, 12, 13, 14, 15, 16};
   int eM[] = {0, 0, 15, 15, 15, 15, 15, 15};
   const char* types[] = {"class", "class", "break", "class", "lunch", "class", "class", "lab"};
-  const char* pats[] = {"westminster", "westminster", "triple-chime", "westminster", "lunch-fanfare", "westminster", "westminster", "dismissal-chime"};
+  const char* pats[] = {"westminster", "college-bell", "triple-chime", "college-bell", "st-michael", "college-bell", "college-bell", "dismissal-chime"};
 
   for (int i = 0; i < 8; i++) {
     strncpy(timetablePeriods[i].id, ids[i], sizeof(timetablePeriods[i].id) - 1);
@@ -3725,7 +3737,7 @@ void handleRealtimeWsMessage(const char *data, size_t len) {
     } else if (p.containsKey("t") && !p["t"].isNull()) {
       lastExecutedBellTs = String((unsigned long long)p["t"].as<unsigned long long>());
     }
-    const char *pat = p["pattern"] | "japanese-school-bell";
+    const char *pat = p["pattern"] | "westminster";
     playBellPattern(pat);
     return;
   }
@@ -4079,7 +4091,7 @@ void syncWithSupabase() {
                       if ((now - lastLocalBellTriggerMs < 12000) || (chimeNoteIndex >= 0)) {
                         Serial.printf("[CLOUD BELL] Echo suppressed: bell already played/playing (%lu ms ago)\n", now - lastLocalBellTriggerMs);
                       } else {
-                        const char* pat = bt["pattern"] | "japanese-school-bell";
+                        const char* pat = bt["pattern"] | "westminster";
                         Serial.printf("[CLOUD BELL] Triggered via Supabase! Pattern: %s, ts: %s\n", pat, ts.c_str());
                         playBellPattern(pat);
                       }
