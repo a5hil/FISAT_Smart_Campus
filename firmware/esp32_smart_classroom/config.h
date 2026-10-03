@@ -75,6 +75,10 @@ const unsigned long SUPABASE_TELEMETRY_INTERVAL_MS =
 #define SCREEN_HEIGHT 64
 #define OLED_RESET_PIN -1
 
+// Set to true to play the full animated FISAT department banner on startup.
+// Set to false for instant, ultra-reliable boot (<1s).
+#define ENABLE_BOOT_ANIMATION false
+
 // --- I2C OLED Display 2: Classroom Digital Notice Board (SSD1306 128x64 on Wire1) ---
 // Uses secondary hardware I2C bus (Wire1) so NO soldering or jumper cutting is needed!
 #define NOTICE_OLED_SDA_PIN 13 // Secondary I2C Data
@@ -207,6 +211,12 @@ const unsigned long LDR_DEBOUNCE_MS = 600;       // Must remain dark continuousl
 // Temperature threshold in Celsius to activate fans in occupied rooms
 const float DEFAULT_TEMP_THRESHOLD = 26.0;
 const float TEMP_HYSTERESIS = 0.5; // 0.5 deg C hysteresis band for fan relay
+
+// PIR Motion Sensor Debounce & Warm-Up Parameters:
+// Filters out power-supply ripples, RF bursts, AC relay coil kickback, and sensor warm-up transients
+const unsigned long PIR_WARMUP_MS = 15000;         // 15 seconds warm-up stabilization after boot
+const unsigned long PIR_SAMPLE_INTERVAL_MS = 60;   // Sample PIR pins every 60ms
+const uint8_t PIR_CONFIRM_SAMPLES = 3;             // Require 3 consecutive HIGH samples (180ms continuous) to confirm motion
 
 // Relay anti-chatter hardware guard (ms)
 const unsigned long RELAY_MIN_SWITCH_INTERVAL_MS = 500;

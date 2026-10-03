@@ -681,6 +681,7 @@ bool cloud_prev_ws2812 = false;
 bool cloud_prev_system_auto = false;
 volatile bool pendingModeCloudSync = false;
 volatile bool pendingIpCloudSync = true;
+volatile bool pendingOccupancyCloudSync = false;
 unsigned long lastLocalModeChange = 0;
 
 // ==========================================
@@ -2123,16 +2124,22 @@ void handleControl() {
 // ==========================================
 void handleConfig() {
   enableCORS();
+  bool nvsLocked = lockNVS();
   if (server.hasArg("temp_thresh")) {
     currentTempThreshold = server.arg("temp_thresh").toFloat();
+    if (nvsLocked) preferences.putFloat("temp_th", currentTempThreshold);
   }
   if (server.hasArg("ldr_thresh")) {
     currentLdrThreshold = server.arg("ldr_thresh").toInt();
+    if (nvsLocked) preferences.putInt("ldr_th", currentLdrThreshold);
   }
   if (server.hasArg("hold_sec")) {
-    currentHoldTime = server.arg("hold_sec").toInt() * 1000UL;
+    int s = server.arg("hold_sec").toInt();
+    if (s >= 5 && s <= 600) {
+      currentHoldTime = (unsigned long)s * 1000UL;
+      if (nvsLocked) preferences.putULong("hold_ms", currentHoldTime);
+    }
   }
-  bool nvsLocked = lockNVS();
   if (server.hasArg("c1_light_w")) {
     rated_c1_light = server.arg("c1_light_w").toFloat();
     if (nvsLocked) preferences.putFloat("r_c1_l", rated_c1_light);
@@ -3396,9 +3403,13 @@ void drawScreen_1(Adafruit_SSD1306 &disp, int progressPercent = -1) {
 }
 
 void playBootAnimation() {
+#if !defined(ENABLE_BOOT_ANIMATION) || !ENABLE_BOOT_ANIMATION
+  return; // Fast, safe boot bypass (<1s boot)
+#else
   if (!oledFound && !noticeOledFound) return;
 
-  Serial.println(F("[BOOT] Playing FISAT boot animation on dual displays..."));
+  Serial.printf("[BOOT] Playing FISAT boot animation (Primary: %s, Notice: %s)...\n",
+                oledFound ? "YES" : "NO", noticeOledFound ? "YES" : "NO");
 
   // Stage 1: Animated center accent line expanding outward
   for (int w = 4; w <= 100; w += 16) {
@@ -3412,6 +3423,7 @@ void playBootAnimation() {
       displayNotice.drawLine(64 - w / 2, 34, 64 + w / 2, 34, SSD1306_WHITE);
       displayNotice.display();
     }
+    yield();
     delay(25);
   }
 
@@ -3419,13 +3431,16 @@ void playBootAnimation() {
   for (int p = 0; p <= 100; p += 10) {
     if (oledFound) drawScreen_1(display, p);
     if (noticeOledFound) drawScreen_1(displayNotice, p);
+    yield();
     delay(45);
   }
 
-  // Stage 4: Hold complete branding screen for 2.0 seconds so it is clearly visible
+  // Stage 3: Hold complete branding screen for 1.2 seconds
   if (oledFound) drawScreen_1(display, 100);
   if (noticeOledFound) drawScreen_1(displayNotice, 100);
-  delay(2000);
+  yield();
+  delay(1200);
+#endif
 }
 
 // ==========================================
@@ -3460,6 +3475,9 @@ void setup() {
   rated_corr1 = preferences.getFloat("r_cr1", WATTS_CORR_LIGHT);
   rated_corr2 = preferences.getFloat("r_cr2", WATTS_CORR_LIGHT);
   rated_ws2812 = preferences.getFloat("r_ws2812", WATTS_WS2812_STRIP);
+  currentHoldTime = preferences.getULong("hold_ms", OCCUPANCY_HOLD_MS);
+  currentTempThreshold = preferences.getFloat("temp_th", DEFAULT_TEMP_THRESHOLD);
+  currentLdrThreshold = preferences.getInt("ldr_th", DEFAULT_LDR_THRESHOLD);
   loadNoticesFromNVS(); // Immediately restore notices onto Notice OLED on boot
   loadTimetableFromNVS(); // Restore timetable schedule from NVS flash memory
   loadDeviceSchedulesFromNVS(); // Restore 24/7 autonomous device schedules from NVS flash memory
@@ -3529,43 +3547,58 @@ void setup() {
   // 4A. Initialize Primary I2C OLED Display (System & Telemetry on Wire: GPIO 21/22)
   Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
   Wire.setClock(400000); // Fast 400kHz I2C to eliminate display loop latency
-  if (display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR)) {
-    oledFound = true;
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0);
-    display.println(F("NBA Smart Classroom"));
-    display.println(F("Dual Controller"));
-    display.println(F("---------------------"));
-    display.println(F("Connecting Wi-Fi..."));
-    display.display();
+  Wire.setTimeOut(30);
+  Wire.beginTransmission(OLED_I2C_ADDR);
+  if (Wire.endTransmission() == 0) {
+    if (display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR, false, false)) {
+      oledFound = true;
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(0, 0);
+      display.println(F("NBA Smart Classroom"));
+      display.println(F("Dual Controller"));
+      display.println(F("---------------------"));
+      display.println(F("Connecting Wi-Fi..."));
+      display.display();
+      Serial.println(F("[OK] Telemetry OLED detected and initialized on Wire (GPIO 21/22)"));
+    } else {
+      oledFound = false;
+      Serial.println(F("[WARN] Telemetry OLED SSD1306 allocation failed (check GPIO 21/22)"));
+    }
   } else {
-    Serial.println(
-        F("[WARN] Telemetry OLED SSD1306 allocation failed (check GPIO 21/22)"));
+    oledFound = false;
+    Serial.println(F("[INFO] Telemetry OLED not detected on Wire (GPIO 21/22) - display disabled"));
   }
 
   // 4B. Initialize Secondary I2C OLED Display (Classroom Notice Board on Wire1: GPIO 13/15)
   I2C_Notice.begin(NOTICE_OLED_SDA_PIN, NOTICE_OLED_SCL_PIN);
   I2C_Notice.setClock(400000); // Fast 400kHz I2C
-  if (displayNotice.begin(SSD1306_SWITCHCAPVCC, NOTICE_OLED_I2C_ADDR)) {
-    noticeOledFound = true;
-    displayNotice.clearDisplay();
-    displayNotice.setTextSize(1);
-    displayNotice.setTextColor(SSD1306_WHITE);
-    displayNotice.setCursor(0, 16);
-    displayNotice.println(F("DIGITAL NOTICE BOARD"));
-    displayNotice.drawLine(0, 28, 128, 28, SSD1306_WHITE);
-    displayNotice.setCursor(0, 38);
-    displayNotice.println(F("   Initializing...   "));
-    displayNotice.display();
-    Serial.println(F("[OK] Notice Board OLED initialized on Wire1 (GPIO 13/15)"));
+  I2C_Notice.setTimeOut(30);
+  I2C_Notice.beginTransmission(NOTICE_OLED_I2C_ADDR);
+  if (I2C_Notice.endTransmission() == 0) {
+    if (displayNotice.begin(SSD1306_SWITCHCAPVCC, NOTICE_OLED_I2C_ADDR, false, false)) {
+      noticeOledFound = true;
+      displayNotice.clearDisplay();
+      displayNotice.setTextSize(1);
+      displayNotice.setTextColor(SSD1306_WHITE);
+      displayNotice.setCursor(0, 16);
+      displayNotice.println(F("DIGITAL NOTICE BOARD"));
+      displayNotice.drawLine(0, 28, 128, 28, SSD1306_WHITE);
+      displayNotice.setCursor(0, 38);
+      displayNotice.println(F("   Initializing...   "));
+      displayNotice.display();
+      Serial.println(F("[OK] Notice Board OLED initialized on Wire1 (GPIO 13/15)"));
+    } else {
+      noticeOledFound = false;
+      Serial.println(F("[WARN] Notice Board OLED SSD1306 allocation failed on Wire1 (GPIO 13/15)"));
+    }
   } else {
-    Serial.println(
-        F("[WARN] Notice Board OLED SSD1306 allocation failed on Wire1 (GPIO 13/15)"));
+    noticeOledFound = false;
+    Serial.println(F("[INFO] Notice Board OLED not detected on Wire1 (GPIO 13/15) - secondary display disabled"));
   }
 
-  // 4C. Play FISAT Department Boot Animation on Both Displays Simultaneously
+  // 4C. Play FISAT Department Boot Animation on Connected Displays (if enabled)
   playBootAnimation();
 
   // 5. Connect to Wi-Fi (Load from NVS Preferences or fallback to config.h defaults)
@@ -4523,10 +4556,14 @@ void syncWithSupabase() {
     return;
   }
 
-  // 2. Push Sensor & Occupancy Telemetry to Supabase (Independent cycle)
-  if (now - lastSupabaseTelemetry >= SUPABASE_TELEMETRY_INTERVAL_MS) {
-    lastSupabaseTelemetry = now;
+  // 2. Push Sensor & Occupancy Telemetry to Supabase (Independent cycle or immediate occupancy transition)
+  if (pendingOccupancyCloudSync || (now - lastSupabaseTelemetry >= SUPABASE_TELEMETRY_INTERVAL_MS)) {
     static int telemetryStep = 0;
+    if (pendingOccupancyCloudSync) {
+      telemetryStep = 0; // Immediately update Classroom A101 on occupancy transition
+      pendingOccupancyCloudSync = false;
+    }
+    lastSupabaseTelemetry = now;
 
     WiFiClientSecure client;
     client.setInsecure();
@@ -4885,9 +4922,61 @@ void loop() {
 
   unsigned long now = millis();
 
-  // 3. Sample PIR Motion & Filtered Corridor LDRs
-  pir1_active = (digitalRead(PIR1_PIN) == HIGH);
-  pir2_active = (digitalRead(PIR2_PIN) == HIGH);
+  // 3. Multi-Sample Debounced PIR Motion & Filtered Corridor LDRs
+  static unsigned long lastPirSampleMs = 0;
+  static uint8_t pir1_stable_high_count = 0;
+  static uint8_t pir2_stable_high_count = 0;
+  static bool pirWarmupLogged = false;
+
+  if (now < PIR_WARMUP_MS) {
+    if (!pirWarmupLogged) {
+      Serial.printf("[PIR] Sensors warming up (stabilizing for %lu s)...\n", PIR_WARMUP_MS / 1000UL);
+      pirWarmupLogged = true;
+    }
+    pir1_active = false;
+    pir2_active = false;
+    pir1_stable_high_count = 0;
+    pir2_stable_high_count = 0;
+  } else if (now - lastPirSampleMs >= PIR_SAMPLE_INTERVAL_MS) {
+    lastPirSampleMs = now;
+
+    // --- PIR 1 (Classroom A101 - GPIO 32) ---
+    if (digitalRead(PIR1_PIN) == HIGH) {
+      if (pir1_stable_high_count < 255) pir1_stable_high_count++;
+      // Require PIR_CONFIRM_SAMPLES (3 consecutive samples = 180ms continuous HIGH) to confirm true physical motion
+      if (pir1_stable_high_count >= PIR_CONFIRM_SAMPLES) {
+        pir1_active = true;
+        c1_last_motion = now;
+        if (!c1_occupied) {
+          c1_occupied = true;
+          pendingOccupancyCloudSync = true;
+          Serial.printf("[OCCUPANCY] Classroom A101 Motion DETECTED -> Status: OCCUPIED (Hold: %lu s)\n",
+                        currentHoldTime / 1000UL);
+        }
+      }
+    } else {
+      pir1_stable_high_count = 0;
+      pir1_active = false;
+    }
+
+    // --- PIR 2 (Classroom A102 - GPIO 33) ---
+    if (digitalRead(PIR2_PIN) == HIGH) {
+      if (pir2_stable_high_count < 255) pir2_stable_high_count++;
+      if (pir2_stable_high_count >= PIR_CONFIRM_SAMPLES) {
+        pir2_active = true;
+        c2_last_motion = now;
+        if (!c2_occupied) {
+          c2_occupied = true;
+          pendingOccupancyCloudSync = true;
+          Serial.printf("[OCCUPANCY] Classroom A102 Motion DETECTED -> Status: OCCUPIED (Hold: %lu s)\n",
+                        currentHoldTime / 1000UL);
+        }
+      }
+    } else {
+      pir2_stable_high_count = 0;
+      pir2_active = false;
+    }
+  }
 
   // Smooth LDR sampling at controlled interval to filter ADC multiplexer noise & relay coil spikes
   static float ldr1_filtered = 2000.0f;
@@ -4919,21 +5008,23 @@ void loop() {
   // 3c. Integrate Real-Time Energy (Riemann sum: kWh = Watts * hours / 1000)
   integrateRealEnergy();
 
-  // 4. Classroom Occupancy State Machines (Debounced Hold Timer)
-  // Classroom 1 Occupancy
-  if (pir1_active) {
-    c1_last_motion = now;
-    c1_occupied = true;
-  } else if (now - c1_last_motion >= currentHoldTime) {
-    c1_occupied = false;
+  // 4. Classroom Occupancy Hold Timers (Auto-Vacant when quiet for currentHoldTime)
+  if (c1_occupied && !pir1_active) {
+    if (now - c1_last_motion >= currentHoldTime) {
+      c1_occupied = false;
+      pendingOccupancyCloudSync = true;
+      Serial.printf("[OCCUPANCY] Classroom A101 quiet for %lu s -> Status: VACANT\n",
+                    currentHoldTime / 1000UL);
+    }
   }
 
-  // Classroom 2 Occupancy
-  if (pir2_active) {
-    c2_last_motion = now;
-    c2_occupied = true;
-  } else if (now - c2_last_motion >= currentHoldTime) {
-    c2_occupied = false;
+  if (c2_occupied && !pir2_active) {
+    if (now - c2_last_motion >= currentHoldTime) {
+      c2_occupied = false;
+      pendingOccupancyCloudSync = true;
+      Serial.printf("[OCCUPANCY] Classroom A102 quiet for %lu s -> Status: VACANT\n",
+                    currentHoldTime / 1000UL);
+    }
   }
 
   // 5. Intelligent Automation Logic (Only active when isAutoMode == true)
@@ -4996,34 +5087,100 @@ void loop() {
       }
     }
 
-    // Classroom 1 Automation (with Temperature Hysteresis for Fan)
+    // Classroom 1 Automation (with Temperature Control for Fan)
     if (c1_occupied) {
       state_c1_light = true;
       state_c1_curtain = true;
-      if (!state_c1_fan && currentTemp > (currentTempThreshold + TEMP_HYSTERESIS)) {
+      // Climate control: turn ON fan if room temperature reaches comfort threshold
+      if (!state_c1_fan && currentTemp >= (currentTempThreshold - 0.5f)) {
         state_c1_fan = true;
-      } else if (state_c1_fan && currentTemp < (currentTempThreshold - TEMP_HYSTERESIS)) {
+      } else if (state_c1_fan && currentTemp < (currentTempThreshold - 1.5f)) {
         state_c1_fan = false;
       }
     } else {
+      // Room Vacant: energy-saving auto power off for all loads
       state_c1_light = false;
       state_c1_curtain = false;
       state_c1_fan = false;
     }
 
-    // Classroom 2 Automation (with Temperature Hysteresis for Fan)
+    // Classroom 2 Automation (with Temperature Control for Fan)
     if (c2_occupied) {
       state_c2_light = true;
       state_c2_curtain = true;
-      if (!state_c2_fan && currentTemp > (currentTempThreshold + TEMP_HYSTERESIS)) {
+      if (!state_c2_fan && currentTemp >= (currentTempThreshold - 0.5f)) {
         state_c2_fan = true;
-      } else if (state_c2_fan && currentTemp < (currentTempThreshold - TEMP_HYSTERESIS)) {
+      } else if (state_c2_fan && currentTemp < (currentTempThreshold - 1.5f)) {
         state_c2_fan = false;
       }
     } else {
       state_c2_light = false;
       state_c2_curtain = false;
       state_c2_fan = false;
+    }
+
+    // Synchronize newly actuated relay states to cloud & anti-echo shield
+    static bool last_auto_c1_light = false;
+    static bool last_auto_c1_fan = false;
+    static bool last_auto_c1_curtain = false;
+    static bool last_auto_c2_light = false;
+    static bool last_auto_c2_fan = false;
+    static bool last_auto_c2_curtain = false;
+    static bool last_auto_corr1_light = false;
+    static bool last_auto_corr2_light = false;
+
+    if (state_c1_light != last_auto_c1_light) {
+      last_auto_c1_light = state_c1_light;
+      queueDeviceCloudSync(0, state_c1_light);
+      lastLocalDeviceControlMs[0] = now;
+      Serial.printf("[AUTO RELAY] C1 Light -> %s (Occupancy: %s)\n",
+                    state_c1_light ? "ON" : "OFF", c1_occupied ? "OCCUPIED" : "VACANT");
+    }
+    if (state_c1_fan != last_auto_c1_fan) {
+      last_auto_c1_fan = state_c1_fan;
+      queueDeviceCloudSync(1, state_c1_fan);
+      lastLocalDeviceControlMs[1] = now;
+      Serial.printf("[AUTO RELAY] C1 Fan -> %s (Temp: %.1f C, Thresh: %.1f C)\n",
+                    state_c1_fan ? "ON" : "OFF", currentTemp, currentTempThreshold);
+    }
+    if (state_c1_curtain != last_auto_c1_curtain) {
+      last_auto_c1_curtain = state_c1_curtain;
+      queueDeviceCloudSync(2, state_c1_curtain);
+      lastLocalDeviceControlMs[2] = now;
+      Serial.printf("[AUTO RELAY] C1 Curtain -> %s\n", state_c1_curtain ? "OPEN" : "CLOSED");
+    }
+    if (state_c2_light != last_auto_c2_light) {
+      last_auto_c2_light = state_c2_light;
+      queueDeviceCloudSync(5, state_c2_light);
+      lastLocalDeviceControlMs[5] = now;
+      Serial.printf("[AUTO RELAY] C2 Light -> %s (Occupancy: %s)\n",
+                    state_c2_light ? "ON" : "OFF", c2_occupied ? "OCCUPIED" : "VACANT");
+    }
+    if (state_c2_fan != last_auto_c2_fan) {
+      last_auto_c2_fan = state_c2_fan;
+      queueDeviceCloudSync(6, state_c2_fan);
+      lastLocalDeviceControlMs[6] = now;
+      Serial.printf("[AUTO RELAY] C2 Fan -> %s\n", state_c2_fan ? "ON" : "OFF");
+    }
+    if (state_c2_curtain != last_auto_c2_curtain) {
+      last_auto_c2_curtain = state_c2_curtain;
+      queueDeviceCloudSync(7, state_c2_curtain);
+      lastLocalDeviceControlMs[7] = now;
+      Serial.printf("[AUTO RELAY] C2 Curtain -> %s\n", state_c2_curtain ? "OPEN" : "CLOSED");
+    }
+    if (state_corr1_light != last_auto_corr1_light) {
+      last_auto_corr1_light = state_corr1_light;
+      queueDeviceCloudSync(8, state_corr1_light);
+      lastLocalDeviceControlMs[8] = now;
+      Serial.printf("[AUTO RELAY] Corridor 1 Light -> %s (LDR: %d)\n",
+                    state_corr1_light ? "ON" : "OFF", ldr1_value);
+    }
+    if (state_corr2_light != last_auto_corr2_light) {
+      last_auto_corr2_light = state_corr2_light;
+      queueDeviceCloudSync(9, state_corr2_light);
+      lastLocalDeviceControlMs[9] = now;
+      Serial.printf("[AUTO RELAY] Corridor 2 Light -> %s (LDR: %d)\n",
+                    state_corr2_light ? "ON" : "OFF", ldr2_value);
     }
   }
 
