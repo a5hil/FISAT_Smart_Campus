@@ -2423,6 +2423,25 @@ void saveNoticesToNVS() {
   Serial.printf("[NVS] Saved %d notices to persistent flash memory.\n", arr.size());
 }
 
+// Filters announcements to ensure only notices for this specific physical notice board
+// (or broadcast 'all') are displayed on screen and trigger audio chimes.
+inline bool isNoticeForThisBoard(String clsId) {
+  clsId.trim();
+  if (clsId.length() == 0 || clsId.equalsIgnoreCase("all") || clsId.equalsIgnoreCase("broadcast")) {
+    return true; // Broadcast notice applies to all rooms
+  }
+  // Physical board is in Classroom A101 (NOTICE_BOARD_CLASSROOM_ID = "cls-a101", CLASSROOM_1_NUM = "A101")
+  if (clsId.equalsIgnoreCase(NOTICE_BOARD_CLASSROOM_ID) || 
+      clsId.equalsIgnoreCase(CLASSROOM_1_ID) || 
+      clsId.equalsIgnoreCase(CLASSROOM_1_NUM) ||
+      clsId.equalsIgnoreCase("a101") ||
+      clsId.equalsIgnoreCase("c1") ||
+      clsId.equalsIgnoreCase("Classroom A101")) {
+    return true;
+  }
+  return false; // Other classrooms (e.g. cls-a102) do NOT have a physical notice board!
+}
+
 void loadNoticesFromNVS() {
   if (!lockNVS()) return;
   String stored = preferences.getString("notices_json", "");
@@ -2440,8 +2459,14 @@ void loadNoticesFromNVS() {
           const char* m = obj["m"];
           const char* d = obj["d"];
           if (id && t && m && noticeCount < MAX_FIRMWARE_NOTICES) {
+            String targetCls = cls ? String(cls) : "all";
+            // Ignore notices for other classrooms stored in flash
+            if (!isNoticeForThisBoard(targetCls)) {
+              continue;
+            }
+
             notices[noticeCount].id = String(id);
-            notices[noticeCount].classroomId = cls ? String(cls) : "all";
+            notices[noticeCount].classroomId = targetCls;
             notices[noticeCount].title = String(t);
             notices[noticeCount].message = String(m);
             notices[noticeCount].duration = d ? String(d) : "24h";
@@ -2465,6 +2490,14 @@ void loadNoticesFromNVS() {
 }
 
 void addOrUpdateNotice(String id, String clsId, String title, String msg, String duration, bool triggerPopup = true, bool saveNvs = true) {
+  // If notice is targeted specifically to another classroom without a board (e.g. cls-a102), do NOT display or chime!
+  if (!isNoticeForThisBoard(clsId)) {
+    deleteNoticeById(id);
+    Serial.printf("[NOTICE] Notice '%s' skipped (Target: %s, Notice Board: %s)\n",
+                  title.c_str(), clsId.c_str(), NOTICE_BOARD_CLASSROOM_ID);
+    return;
+  }
+
   cleanExpiredNotices();
   unsigned long durMs = 0;
   duration.toLowerCase();
@@ -2792,14 +2825,8 @@ void updateNoticeBoardDisplay() {
 
   if (lockNotices(pdMS_TO_TICKS(20))) {
     for (int i = 0; i < noticeCount; i++) {
-      if (notices[i].active) {
-        String cId = notices[i].classroomId;
-        cId.toLowerCase();
-        if (cId == "all" || cId.length() == 0 ||
-            cId == "cls-a101" || cId == "a101" || cId == CLASSROOM_1_ID ||
-            cId == "cls-a102" || cId == "a102" || cId == CLASSROOM_2_ID) {
-          eligibleIndices[eligibleCount++] = i;
-        }
+      if (notices[i].active && isNoticeForThisBoard(notices[i].classroomId)) {
+        eligibleIndices[eligibleCount++] = i;
       }
     }
     if (eligibleCount > 0) {
@@ -3830,7 +3857,14 @@ void handleRealtimeWsMessage(const char *data, size_t len) {
     const char *ndur = p["duration"] | "24h";
     if (ntitle && nmsg) {
       String idStr = nid ? String(nid) : ("ws-" + String(millis()));
-      addOrUpdateNotice(idStr, String(ncls), String(ntitle), String(nmsg), String(ndur), true, true);
+      String targetCls = String(ncls);
+      if (!isNoticeForThisBoard(targetCls)) {
+        if (nid) deleteNoticeById(String(nid));
+        Serial.printf("[NOTICE] WS push announcement skipped for this board: '%s' (Target: %s, Notice Board: %s)\n",
+                      ntitle, targetCls.c_str(), NOTICE_BOARD_CLASSROOM_ID);
+        return;
+      }
+      addOrUpdateNotice(idStr, targetCls, String(ntitle), String(nmsg), String(ndur), true, true);
       Serial.printf("[NOTICE] WS push announcement displayed: '%s'\n", ntitle);
     }
     return;
@@ -4675,7 +4709,7 @@ void syncWithSupabase() {
     } else {
       // Slot 4: Cloud Digital Notice Board Announcements
       // Reads dedicated active, non-expired announcements from Supabase with lean projection
-      String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?select=id,classroom_id,title,message,duration&is_active=eq.true&or=%28expires_at.is.null,expires_at.gt.now%28%29%29&order=created_at.desc&limit=6";
+      String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?select=id,classroom_id,title,message,duration&is_active=eq.true&or=%28expires_at.is.null,expires_at.gt.now%28%29%29&order=created_at.desc&limit=12";
       const char *annHeaderKeys[] = {"Date"};
       https.collectHeaders(annHeaderKeys, 1);
       if (https.begin(client, urlAnn)) {
@@ -4721,8 +4755,14 @@ void reconcileNoticesFromCloud(JsonArray cloudNotices) {
     String dur = (adur && strlen(adur) > 0) ? String(adur) : "24h";
 
     if (aid && atitle && amsg && updatedCount < MAX_FIRMWARE_NOTICES) {
+      String targetCls = cid ? String(cid) : "all";
+      // Ignore notices targeted specifically for other classrooms without a board (e.g. cls-a102)
+      if (!isNoticeForThisBoard(targetCls)) {
+        continue;
+      }
+
       updated[updatedCount].id = String(aid);
-      updated[updatedCount].classroomId = cid ? String(cid) : "all";
+      updated[updatedCount].classroomId = targetCls;
       updated[updatedCount].title = String(atitle);
       updated[updatedCount].message = String(amsg);
       updated[updatedCount].duration = dur;
@@ -4832,7 +4872,7 @@ void fetchNoticesFromSupabaseCloud() {
   client.setInsecure();
   client.setTimeout(4000);
   HTTPClient https;
-  String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?select=id,classroom_id,title,message,duration&is_active=eq.true&or=%28expires_at.is.null,expires_at.gt.now%28%29%29&order=created_at.desc&limit=8";
+  String urlAnn = String(SUPABASE_URL) + "/rest/v1/announcements?select=id,classroom_id,title,message,duration&is_active=eq.true&or=%28expires_at.is.null,expires_at.gt.now%28%29%29&order=created_at.desc&limit=12";
   if (https.begin(client, urlAnn)) {
     https.addHeader("apikey", SUPABASE_KEY);
     https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
@@ -5248,19 +5288,13 @@ void loop() {
 
     // If secondary OLED is not connected, handle notices directly on primary OLED
     if (!noticeOledFound) {
-      // Collect eligible notices for A101 / A102 / ALL
+      // Collect eligible notices for this notice board (A101 / ALL)
       int eligibleIndices[MAX_FIRMWARE_NOTICES];
       int eligibleCount = 0;
       if (lockNotices(pdMS_TO_TICKS(20))) {
         for (int i = 0; i < noticeCount; i++) {
-          if (notices[i].active) {
-            String cId = notices[i].classroomId;
-            cId.toLowerCase();
-            if (cId == "all" || cId.length() == 0 ||
-                cId == "cls-a101" || cId == "a101" || cId == CLASSROOM_1_ID ||
-                cId == "cls-a102" || cId == "a102" || cId == CLASSROOM_2_ID) {
-              eligibleIndices[eligibleCount++] = i;
-            }
+          if (notices[i].active && isNoticeForThisBoard(notices[i].classroomId)) {
+            eligibleIndices[eligibleCount++] = i;
           }
         }
         unlockNotices();

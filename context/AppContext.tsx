@@ -2363,9 +2363,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       duration: newNotice.duration || '24h',
     });
 
-    // 1. Direct LAN dispatch to ESP32 for immediate OLED update
+    // 1. Direct LAN dispatch to ESP32 for immediate OLED update (Only if broadcast or targeted to A101 notice board)
+    const isTargetForNoticeBoard = !newNotice.classroomId || 
+      newNotice.classroomId === 'all' || 
+      newNotice.classroomId === 'cls-a101' || 
+      newNotice.classroomId.toLowerCase().includes('101');
+
     const targetIp = esp32Ip || classrooms.find(c => c.controller?.ipAddress)?.controller?.ipAddress;
-    if (targetIp) {
+    if (targetIp && isTargetForNoticeBoard) {
       try {
         const baseUrl = targetIp.startsWith('http') ? targetIp : `http://${targetIp}`;
         const controller = new AbortController();

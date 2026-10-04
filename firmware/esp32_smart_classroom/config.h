@@ -84,6 +84,8 @@ const unsigned long SUPABASE_TELEMETRY_INTERVAL_MS =
 #define NOTICE_OLED_SDA_PIN 13 // Secondary I2C Data
 #define NOTICE_OLED_SCL_PIN 15 // Secondary I2C Clock
 #define NOTICE_OLED_I2C_ADDR 0x3C
+// Physical classroom location of the Digital Notice Board OLED (Only notices for this room or 'all' will display/chime)
+#define NOTICE_BOARD_CLASSROOM_ID CLASSROOM_1_ID // Classroom A101 ("cls-a101")
 #define NOTICE_ROTATION_MS 20000 // Rotate through notices every 20 seconds
 #define CLOCK_INTERVAL_MS 120000 // Display clock slide every 2 minutes (120s)
 #define CLOCK_DISPLAY_DURATION_MS 8000 // Show clock for 8 seconds
