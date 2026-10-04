@@ -1,5 +1,5 @@
 -- =================================================================================
--- NBA SMART CLASSROOM - USERS TABLE & DATABASE AUTHENTICATION SCHEMA
+-- FISAT SMART CAMPUS - USERS TABLE & DATABASE AUTHENTICATION SCHEMA
 -- Run this in your Supabase SQL Editor (Dashboard -> SQL Editor -> New Query)
 -- =================================================================================
 

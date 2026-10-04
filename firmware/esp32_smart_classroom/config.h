@@ -1,8 +1,8 @@
 /**
  * ==============================================================================
- * SMART CLASSROOM AUTOMATION SYSTEM - DUAL ZONE CONTROLLER
+ * SMART CAMPUS AUTOMATION SYSTEM - DUAL ZONE CONTROLLER
  * Configuration & Pin Mapping Header
- * Project: NBA Smart Classroom App (NBA_SCR_App)
+ * Project: FISAT Smart Campus App
  * Hardware Target: ESP32 Development Board (ESP32-WROOM-32)
  * ==============================================================================
  */
@@ -25,7 +25,7 @@ const char *const DEFAULT_WIFI_PASSWORD = "idea#fisat";
 
 // Standalone Setup Hotspot
 // Automatically starts if connection to saved Wi-Fi fails or times out
-const char *const SETUP_AP_SSID = "NBA-Smart-Classroom";
+const char *const SETUP_AP_SSID = "FISAT-Smart-Campus";
 const char *const SETUP_AP_PASSWORD = ""; // Open hotspot for effortless connection
 const int WIFI_CONNECT_TIMEOUT_SEC = 15;  // Seconds before starting setup hotspot
 

@@ -2567,7 +2567,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     return {
       success: false,
-      message: 'Could not reach ESP32 directly. Ensure your phone is connected to the same Wi-Fi or the "NBA-Smart-Classroom" setup hotspot.',
+      message: 'Could not reach ESP32 directly. Ensure your phone is connected to the same Wi-Fi or the "FISAT-Smart-Campus" setup hotspot.',
     };
   }, [esp32Ip, showToast]);
 

@@ -247,5 +247,5 @@ SET
 -- Seed Default Welcome Notice
 INSERT INTO public.announcements (id, classroom_id, classroom_name, title, message, duration, is_active, created_at)
 VALUES 
-  ('ann-welcome-01', 'all', 'All Classrooms (Broadcast)', 'Welcome to NBA Smart Campus', 'All IoT energy monitoring, automation, timetable bells, and corridor LED controls active.', '24h', true, NOW())
+  ('ann-welcome-01', 'all', 'All Classrooms (Broadcast)', 'Welcome to FISAT Smart Campus', 'All IoT energy monitoring, automation, timetable bells, and corridor LED controls active.', '24h', true, NOW())
 ON CONFLICT (id) DO NOTHING;

@@ -1,7 +1,7 @@
 /**
  * ==============================================================================
- * SMART CLASSROOM AUTOMATION SYSTEM - DUAL ZONE CONTROLLER
- * Project: NBA Smart Classroom App (NBA_SCR_App)
+ * SMART CAMPUS AUTOMATION SYSTEM - DUAL ZONE CONTROLLER
+ * Project: FISAT Smart Campus App
  * Target: ESP32 Development Board (ESP32-WROOM-32)
  *
  * Capabilities:
@@ -2191,7 +2191,7 @@ void handleWiFiPortal() {
 
   String html = F("<!DOCTYPE html><html><head><meta charset='UTF-8'>"
                   "<meta name='viewport' content='width=device-width,initial-scale=1.0'>"
-                  "<title>NBA Smart Classroom</title>"
+                  "<title>FISAT Smart Campus</title>"
                   "<style>"
                   "body{font-family:sans-serif;background:#0F0F0F;color:#FFF;margin:0;padding:20px;display:flex;justify-content:center;align-items:center;min-height:100vh;box-sizing:border-box;}"
                   ".card{background:#1A1A1A;border-radius:14px;padding:20px;max-width:380px;width:100%;box-shadow:0 8px 24px rgba(0,0,0,0.5);}"
@@ -2279,7 +2279,7 @@ void handleSaveWiFi() {
   html += F("</span>...</p>"
             "<p>The controller is restarting now. Please reconnect your phone to <span class='net'>");
   html += ssid;
-  html += F("</span> to access the Smart Classroom app.</p>"
+  html += F("</span> to access the FISAT Smart Campus app.</p>"
             "</div></body></html>");
 
   server.send(200, "text/html", html);
@@ -3300,7 +3300,7 @@ void handleRoot() {
     return;
   }
   server.send(200, "application/json",
-              "{\"system\":\"NBA Smart Classroom Controller\",\"firmware\":\"" +
+              "{\"system\":\"FISAT Smart Campus Controller\",\"firmware\":\"" +
                   String(FIRMWARE_VERSION) + "\",\"status\":\"online\",\"ssid\":\"" +
                   String(WiFi.SSID()) + "\"}");
 }
@@ -3454,7 +3454,7 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println(F("\n=============================================="));
-  Serial.println(F(" NBA SMART CLASSROOM - DUAL ZONE CONTROLLER"));
+  Serial.println(F(" FISAT SMART CAMPUS - DUAL ZONE CONTROLLER"));
   Serial.printf(F(" Firmware Version: %s\n"), FIRMWARE_VERSION);
   Serial.println(F("=============================================="));
 
@@ -3462,9 +3462,30 @@ void setup() {
   if (!noticeMutex) noticeMutex = xSemaphoreCreateMutex();
   if (!nvsMutex) nvsMutex = xSemaphoreCreateMutex();
 
-  // Initialize NVS Preferences to restore persistent system mode & energy
-  // across boots
-  preferences.begin("nba_scr", false);
+  // Initialize NVS Preferences to restore persistent system mode & energy across boots
+  preferences.begin("fisat_campus", false);
+
+  // Auto-migrate settings from legacy 'nba_scr' namespace if this is the first boot
+  if (!preferences.isKey("wifi_ssid")) {
+    Preferences legacyPrefs;
+    if (legacyPrefs.begin("nba_scr", true)) {
+      if (legacyPrefs.isKey("wifi_ssid")) {
+        preferences.putString("wifi_ssid", legacyPrefs.getString("wifi_ssid", ""));
+        preferences.putString("wifi_pass", legacyPrefs.getString("wifi_pass", ""));
+        preferences.putBool("auto_mode", legacyPrefs.getBool("auto_mode", false));
+        preferences.putFloat("c1_kwh", legacyPrefs.getFloat("c1_kwh", 0.0f));
+        preferences.putFloat("c2_kwh", legacyPrefs.getFloat("c2_kwh", 0.0f));
+        preferences.putULong("hold_ms", legacyPrefs.getULong("hold_ms", OCCUPANCY_HOLD_MS));
+        preferences.putFloat("temp_th", legacyPrefs.getFloat("temp_th", DEFAULT_TEMP_THRESHOLD));
+        preferences.putInt("ldr_th", legacyPrefs.getInt("ldr_th", DEFAULT_LDR_THRESHOLD));
+        if (legacyPrefs.isKey("notices_json")) preferences.putString("notices_json", legacyPrefs.getString("notices_json", ""));
+        if (legacyPrefs.isKey("tt_json")) preferences.putString("tt_json", legacyPrefs.getString("tt_json", ""));
+        Serial.println(F("[NVS] Seamlessly migrated legacy 'nba_scr' data to 'fisat_campus'"));
+      }
+      legacyPrefs.end();
+    }
+  }
+
   isAutoMode = preferences.getBool("auto_mode", false);
   c1_accumulated_kwh = preferences.getFloat("c1_kwh", 0.0f);
   c2_accumulated_kwh = preferences.getFloat("c2_kwh", 0.0f);
@@ -3556,7 +3577,7 @@ void setup() {
       display.setTextSize(1);
       display.setTextColor(SSD1306_WHITE);
       display.setCursor(0, 0);
-      display.println(F("NBA Smart Classroom"));
+      display.println(F("FISAT Smart Campus"));
       display.println(F("Dual Controller"));
       display.println(F("---------------------"));
       display.println(F("Connecting Wi-Fi..."));
@@ -3609,7 +3630,7 @@ void setup() {
   if (oledFound) {
     display.clearDisplay();
     display.setCursor(0, 0);
-    display.println(F("NBA Smart Classroom"));
+    display.println(F("FISAT Smart Campus"));
     display.println(F("Connecting to:"));
     display.println(configured_ssid);
     display.println(F("Please wait..."));
@@ -3648,7 +3669,7 @@ void setup() {
     display.clearDisplay();
     display.setCursor(0, 0);
     if (!isApSetupMode && WiFi.status() == WL_CONNECTED) {
-      display.println(F("NBA IoT Controller"));
+      display.println(F("FISAT Smart Campus"));
       display.println(F("---------------------"));
       display.println(F("Wi-Fi: Connected"));
       display.println(configured_ssid);

@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 
 /**
- * Universal Haptic Feedback utility for NBA Smart Classroom App
+ * Universal Haptic Feedback utility for FISAT Smart Campus App
  * Provides consistent, tactile, native vibration responses across all platforms.
  */
 export const triggerHaptic = {

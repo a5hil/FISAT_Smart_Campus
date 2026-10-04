@@ -1,8 +1,8 @@
-# NBA Smart Classroom - ESP32 Dual-Classroom Controller Firmware
+# FISAT Smart Campus - ESP32 Dual-Classroom Controller Firmware
 
 Production firmware for driving **two smart classrooms (Classroom A101 & Classroom A102)** plus **corridor lighting** using a single **ESP32 DevKit** micro-controller. 
 
-This firmware integrates directly with the **NBA Smart Classroom Management System** React Native mobile app (`NBA_SCR_App`).
+This firmware integrates directly with the **FISAT Smart Campus Management System** React Native mobile app.
 
 ---
 

@@ -130,7 +130,7 @@ export default function SignUpScreen() {
         <View style={styles.titleContainer}>
           <Text style={styles.badgeText}>NEW USER REGISTRATION</Text>
           <Text style={styles.title}>Let's{'\n'}Get Started</Text>
-          <Text style={styles.subtitle}>Create your profile in the FISAT Smart Classroom database</Text>
+          <Text style={styles.subtitle}>Create your profile in the FISAT Smart Campus database</Text>
         </View>
 
         {/* Error Banner */}
